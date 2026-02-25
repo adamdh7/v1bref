@@ -1,20 +1,16 @@
 [
   {
-    "description": "Nouvel article : comment automatiser vos publications et gagner du temps. Exemples et outils pratiques.",
-    "url": "https://bot.adamdh7.org/article-automatisation",
-    "image_url": "https://bref.adamdh7.org/images/auto.png",
-    "donation_url": "https://t.me/adamdhaiti2",
-    "telegram_target": "@adamdhaiti2"
+    "description": "bref un web D'H7 | Tergene ou les user peuvent trouver leur url bref gratuitement....",
+    "url": "bref.adamdh7.org",
+    "image_url": "https://adamdh7.org/adamdh7.ong",
+    "donation_url": "https://donate.example.com"
   },
   {
-    "description": "Découverte du jour : un service pour héberger des images simplement et rapidement.",
-    "url": "https://bref.adamdh7.org/decouverte",
-    "image_base64": "",
-    "telegram_target": "@adamdhaiti2"
+    "description": "tou.adamdh7.org permet de gérer tous tes liens courts avec une interface moderne et rapide.",
+    "url": "tou.adamdh7.org"
   },
   {
-    "description": "Annonce rapide : mise à jour de l'application — corrections et améliorations de performance.",
-    "url": "",
-    "telegram_target": "@adamdhaiti2"
+    "description": "adamdh7.org est le hub principal pour tous les services H7.",
+    "url": "adamdh7.org"
   }
 ]
