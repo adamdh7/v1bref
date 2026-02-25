@@ -411,6 +411,10 @@ app.get('/_admin/mapping/:token', async (req, res) => {
   return res.json(out);
 });
 
+app.get('/poste.json', (req, res) => {
+  res.sendFile(__dirname + '/poste.json');
+});
+
 app.get('/_admin/mappings', (req, res) => {
   return res.json({ count: Object.keys(mappings).length, tokens: Object.keys(mappings).slice(0,50) });
 });
