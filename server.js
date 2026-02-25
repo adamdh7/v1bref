@@ -412,7 +412,23 @@ app.get('/_admin/mapping/:token', async (req, res) => {
 });
 
 app.get('/poste.json', (req, res) => {
-  res.sendFile(__dirname + '/poste.json');
+  try {
+    const filePath = path.join(__dirname, 'poste.json');
+    if (!fs.existsSync(filePath)) {
+      return res.json([]);
+    }
+    const fileContent = fs.readFileSync(filePath, 'utf8');
+    const jsonData = JSON.parse(fileContent);
+    if (!Array.isArray(jsonData)) {
+      return res.json(jsonData);
+    }
+    const shuffled = jsonData.sort(() => 0.5 - Math.random());
+    const randomCount = Math.floor(Math.random() * 2) + 3;
+    const result = shuffled.slice(0, randomCount);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Server Error' });
+  }
 });
 
 app.get('/_admin/mappings', (req, res) => {
