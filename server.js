@@ -410,6 +410,9 @@ app.get('/_admin/mapping/:token', async (req, res) => {
   } catch(e){}
   return res.json(out);
 });
+app.get('/sitemap.xml', (req, res) => {
+    res.sendFile(path.join(__dirname, 'sitemap.xml'));
+});
 
 app.get('/poste.json', (req, res) => {
   try {
