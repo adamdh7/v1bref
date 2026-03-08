@@ -1,119 +1,144 @@
 <!doctype html>
-<html lang="ht">
+<html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Bref.Adam_D'H7</title>
-  <meta property="og:title" content="Bref">
+  
+  <meta name="description" content="Bref.Adam_D'H7, développé par D'H7 | Tergene, permet de générer des URL éphémères rapidement et en toute sécurité." />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <link rel="canonical" href="https://bref.adamdh7.org/" />
+  
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://bref.adamdh7.org/" />
+  <meta property="og:title" content="Bref.Adam_D'H7" />
+  <meta property="og:description" content="Bref.Adam_D'H7, développé par D'H7 | Tergene, permet de générer des URL éphémères rapidement et en toute sécurité." />
+  <meta property="og:image" content="https://adamdh7.org/adamdh7.png" />
+  
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="https://bref.adamdh7.org/" />
+  <meta name="twitter:title" content="Bref.Adam_D'H7" />
+  <meta name="twitter:description" content="Bref.Adam_D'H7, développé par D'H7 | Tergene, permet de générer des URL éphémères rapidement et en toute sécurité." />
+  <meta name="twitter:image" content="https://adamdh7.org/adamdh7.png" />
+  
   <link rel="manifest" href="manifest.json" />
-  <link rel="icon" type="image/png" href="https://adamdh7.org/adamdh7.png">
-  <meta name="theme-color" content="#000000" />
+  <link rel="icon" type="image/png" href="https://adamdh7.org/adamdh7.png" />
+  <link rel="apple-touch-icon" href="https://adamdh7.org/adamdh7.png" />
+  
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8fafc" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Bref" />
-  <link rel="apple-touch-icon" href="https://adamdh7.org/adamdh7.png" />
+
   <script src="https://cdn.tailwindcss.com"></script>
 
   <style>
-    body { font-family: 'Segoe UI', sans-serif; background-color: #f8fafc; margin: 0; }
-    .ad-layer { pointer-events: auto; z-index: 9999; } /* piblisite aktive */
-    #mainUI { position: relative; z-index: 10001; }
-    #ad-left, #ad-right { width: 90px; max-width: 120px; }
-    #ad-top, #ad-bottom { height: 90px; }
-    .ad-frame { display: block; }
-    .ad-layer iframe, .ad-layer > div { opacity: 0.98; }
-    .copied { color: #059669; font-weight: 600; }
-
-    /* Amelyorasyon pou non fichye yo */
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      transition: background-color 0.3s, color 0.3s;
+    }
+    .ad-layer {
+      pointer-events: auto;
+      z-index: 9999;
+    }
+    #mainUI {
+      position: relative;
+      z-index: 10001;
+      width: 100%;
+    }
+    #ad-left, #ad-right {
+      width: 90px;
+      max-width: 120px;
+    }
+    #ad-top, #ad-bottom {
+      height: 90px;
+    }
+    .ad-frame {
+      display: block;
+    }
+    .ad-layer iframe, .ad-layer > div {
+      opacity: 0.98;
+    }
+    .copied {
+      color: #059669;
+      font-weight: 600;
+    }
     .file-name {
-      display: -webkit-box;
-      -webkit-box-orient: vertical;
-      -webkit-line-clamp: 2; /* montre max 2 liy, apre sa elips */
-      overflow: hidden;
-      text-overflow: ellipsis;
+      word-wrap: break-word;
+      word-break: break-all;
       white-space: normal;
-      word-break: break-word; /* kase mo long tankou non dosye yo */
-      cursor: pointer;
+      line-height: 1.4;
     }
-
-    /* lè itilizatè klike pou agrandi */
-    .file-name.expanded {
-      -webkit-line-clamp: unset;
-      overflow: visible;
-      text-overflow: unset;
-      white-space: normal;
+    @media (max-width: 420px) {
+      .file-name {
+        font-size: 13px;
+      }
+      .ad-layer {
+        display: none;
+      }
     }
-
-    /* ti ajisteman pou w pa kraze layout sou mobil */
-    .selected-row { display:flex; align-items:flex-start; gap:0.5rem; }
-    .selected-row .meta { flex:1; min-width:0; } /* min-width:0 pou truncate travay byen */
-
-    /* responsive tweaks */
-    @media (max-width:420px) {
-      .file-name { font-size: 13px; }
-      .ad-layer { display:none; } /* ou ka kache ad sou ti ekran si ou vle */
+    @media (prefers-color-scheme: dark) {
+      .copied {
+        color: #10b981;
+      }
     }
   </style>
 </head>
-<body class="relative">
-  <div id="mainUI" class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white w-full max-w-2xl rounded-3xl shadow-xl p-6 space-y-5">
+<body class="relative bg-slate-50 dark:bg-slate-900 text-gray-900 dark:text-gray-100 min-h-screen">
+  <div id="mainUI" class="flex items-center justify-center min-h-screen p-4 w-full">
+    <div class="bg-white dark:bg-gray-800 w-full max-w-2xl rounded-3xl shadow-xl dark:shadow-2xl p-6 space-y-5 border border-transparent dark:border-gray-700 transition-colors duration-300">
 
-      <h2 class="text-xl font-bold text-center text-gray-800">Bref</h2>
+      <h2 class="text-xl font-bold text-center text-gray-800 dark:text-white">Bref</h2>
 
-      <!-- multiple attribute allows selecting plizyè fichye -->
-      <input id="fileInput" type="file" accept="*/*" multiple class="block w-full text-sm text-gray-700 bg-gray-100 rounded-xl border border-gray-300 p-2 cursor-pointer" />
+      <input id="fileInput" type="file" accept="*/*" multiple class="block w-full text-sm text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-xl border border-gray-300 dark:border-gray-600 p-2 cursor-pointer transition-colors" />
 
-      <div id="selectedList" class="grid gap-2"></div>
+      <div id="selectedList" class="grid gap-2 w-full"></div>
 
-      <div class="flex gap-2">
-        <button id="uploadBtn" class="flex-1 w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-xl transition">Upload tout</button>
-        <button id="cancelAllBtn" class="w-32 bg-gray-200 text-gray-700 font-semibold py-2 rounded-xl hidden">Anile tout</button>
+      <div class="flex gap-2 w-full">
+        <button id="uploadBtn" class="flex-1 w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-xl transition-colors">Upload tout</button>
+        <button id="cancelAllBtn" class="w-32 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-500 font-semibold py-2 rounded-xl hidden transition-colors">Anile tout</button>
       </div>
 
-      <div id="overallProgressWrap" class="mt-2 hidden">
-        <div class="text-xs text-gray-600 mb-1">Pwogrè total</div>
-        <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+      <div id="overallProgressWrap" class="mt-2 hidden w-full">
+        <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">Pwogrè total</div>
+        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
           <div id="overallProgressFill" style="width:0%" class="h-3 rounded-full transition-all bg-blue-500"></div>
         </div>
         <div class="flex justify-between items-center mt-2 text-xs">
-          <div id="overallPct" class="font-mono text-sm">0%</div>
-          <div id="overallInfo" class="text-gray-500 text-xs"></div>
+          <div id="overallPct" class="font-mono text-sm dark:text-gray-200">0%</div>
+          <div id="overallInfo" class="text-gray-500 dark:text-gray-400 text-xs"></div>
         </div>
       </div>
 
-      <div id="result" class="text-center text-sm text-gray-700"></div>
+      <div id="result" class="text-center text-sm text-gray-700 dark:text-gray-300 w-full break-words"></div>
 
-      <div id="previewAll" class="mt-4 space-y-4"></div>
+      <div id="previewAll" class="mt-4 space-y-4 w-full"></div>
 
     </div>
   </div>
 
-  <!-- ad-layer placeholders -->
   <div id="ad-top" class="ad-layer fixed top-0 left-0 w-full flex justify-center items-start"></div>
   <div id="ad-left" class="ad-layer fixed top-1/4 left-0 h-1/2 flex items-center"></div>
   <div id="ad-right" class="ad-layer fixed top-1/4 right-0 h-1/2 flex items-center"></div>
   <div id="ad-bottom" class="ad-layer fixed bottom-0 left-0 w-full flex justify-center items-end"></div>
 
   <script>
-    // Elements
     const fileInput = document.getElementById('fileInput');
     const selectedList = document.getElementById('selectedList');
     const uploadBtn = document.getElementById('uploadBtn');
     const cancelAllBtn = document.getElementById('cancelAllBtn');
     const result = document.getElementById('result');
-
     const overallProgressWrap = document.getElementById('overallProgressWrap');
     const overallProgressFill = document.getElementById('overallProgressFill');
     const overallPct = document.getElementById('overallPct');
     const overallInfo = document.getElementById('overallInfo');
-
     const previewAll = document.getElementById('previewAll');
 
-    // state
-    let filesArray = []; // array of File objects selected
-    let xhrs = new Map(); // map index -> xhr for cancellation
+    let filesArray = [];
+    let xhrs = new Map();
     let uploading = false;
 
     function humanFileSize(bytes) {
@@ -137,58 +162,51 @@
         .replace(/'/g, "&#039;");
     }
 
-    // renderSelectedList (improved for truncation & expand on click)
     function renderSelectedList() {
       selectedList.innerHTML = '';
       if (filesArray.length === 0) {
-        selectedList.innerHTML = `<div class="text-xs text-gray-500 italic">Pa gen fichye chwazi.</div>`;
+        selectedList.innerHTML = `<div class="text-xs text-gray-500 dark:text-gray-400 italic text-center">Pa gen fichye chwazi.</div>`;
         return;
       }
 
       const grid = document.createElement('div');
-      grid.className = 'space-y-1';
+      grid.className = 'space-y-2 w-full';
 
       filesArray.forEach((file, idx) => {
         const row = document.createElement('div');
-        row.className = 'flex items-center justify-between gap-2 bg-gray-50 border border-gray-200 rounded-xl p-2 selected-row';
+        row.className = 'flex items-start justify-between gap-3 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl p-3 w-full transition-colors';
 
         const left = document.createElement('div');
-        left.className = 'flex items-start gap-2 meta';
+        left.className = 'flex items-start gap-3 w-full min-w-0';
 
-        // icon oswa preview si ou vle (optional)
         const icon = document.createElement('div');
-        icon.className = 'w-10 h-10 flex-shrink-0 rounded-md bg-gray-100 flex items-center justify-center text-xs text-gray-600';
+        icon.className = 'w-10 h-10 flex-shrink-0 rounded-lg bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-xs font-bold text-gray-600 dark:text-gray-300';
         icon.textContent = file.type && file.type.startsWith('video') ? 'VID' : 'FILE';
 
         const titleWrap = document.createElement('div');
-        titleWrap.style.minWidth = '0'; // trè enpòtan pou truncate sou flex
+        titleWrap.className = 'flex-1 min-w-0 flex flex-col';
+
         const title = document.createElement('div');
-        title.className = 'file-name text-sm text-gray-800';
+        title.className = 'file-name text-sm font-medium text-gray-800 dark:text-gray-100';
         title.textContent = file.name;
-        title.title = file.name; // hover/long-press montre non antye
-        // klike pou toggle ekspansyon non an (montre antye)
-        title.addEventListener('click', () => {
-          title.classList.toggle('expanded');
-        });
 
         const sub = document.createElement('div');
-        sub.className = 'text-xs text-gray-500';
+        sub.className = 'text-xs text-gray-500 dark:text-gray-400 mt-1';
         sub.textContent = `${humanFileSize(file.size)} • ${file.type || '—'}`;
 
         titleWrap.appendChild(title);
         titleWrap.appendChild(sub);
-
         left.appendChild(icon);
         left.appendChild(titleWrap);
 
         const right = document.createElement('div');
-        right.className = 'flex items-center gap-2';
+        right.className = 'flex items-center flex-shrink-0';
 
         const removeBtn = document.createElement('button');
-        removeBtn.className = 'text-xs text-red-600 px-2 py-1 rounded-md bg-red-50 border border-red-100';
+        removeBtn.className = 'text-xs font-semibold text-red-600 dark:text-red-400 px-3 py-1.5 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-100 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors';
         removeBtn.textContent = 'Retire';
         removeBtn.onclick = () => {
-          if (uploading) return; // pa pèmèt retire pandan upload
+          if (uploading) return;
           filesArray.splice(idx, 1);
           renderSelectedList();
         };
@@ -202,15 +220,12 @@
       selectedList.appendChild(grid);
     }
 
-    // when user selects files
     fileInput.addEventListener('change', (e) => {
       const list = Array.from(e.target.files || []);
-      // append new selection to existing list
       filesArray = filesArray.concat(list);
       renderSelectedList();
     });
 
-    // Upload logic: CONCURRENT uploads (tout menm moman)
     uploadBtn.addEventListener('click', async () => {
       if (filesArray.length === 0) {
         return alert('Tanpri chwazi omwen yon fichye anvan ou upload.');
@@ -224,36 +239,34 @@
 
       overallProgressWrap.classList.remove('hidden');
       overallInfo.textContent = '';
-
-      previewAll.innerHTML = ''; // reset preview area
+      previewAll.innerHTML = '';
       xhrs.clear();
 
       const totalBytes = filesArray.reduce((s,f) => s + f.size, 0);
       const loadedBytes = new Array(filesArray.length).fill(0);
 
-      // create UI blocks for all files before starting
       const blocks = filesArray.map((file, i) => {
         const block = document.createElement('div');
-        block.className = 'p-3 bg-white border border-gray-200 rounded-xl shadow-sm';
+        block.className = 'p-4 bg-gray-50 dark:bg-gray-700/30 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm w-full transition-colors';
         block.innerHTML = `
-          <div class="flex items-center justify-between">
-            <div>
-              <div class="font-semibold text-sm text-gray-800">${escapeHtml(file.name)}</div>
-              <div class="text-xs text-gray-500">${humanFileSize(file.size)} • ${file.type || '—'}</div>
+          <div class="flex items-start justify-between gap-3 w-full min-w-0">
+            <div class="flex-1 min-w-0">
+              <div class="font-semibold text-sm text-gray-800 dark:text-gray-100 file-name">${escapeHtml(file.name)}</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">${humanFileSize(file.size)} • ${file.type || '—'}</div>
             </div>
-            <div class="flex items-center gap-2">
-              <button class="text-xs text-gray-600 px-2 py-1 rounded-md bg-gray-50 hidden file-cancel">Anile</button>
+            <div class="flex-shrink-0">
+              <button class="text-xs font-semibold text-gray-600 dark:text-gray-300 px-3 py-1.5 rounded-lg bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 hidden file-cancel transition-colors">Anile</button>
             </div>
           </div>
-          <div class="mt-3">
-            <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+          <div class="mt-4">
+            <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 overflow-hidden">
               <div class="file-progress h-2 rounded-full transition-all bg-blue-500" style="width:0%"></div>
             </div>
             <div class="flex justify-between items-center mt-2 text-xs">
-              <div class="file-pct font-mono text-sm">0%</div>
-              <div class="file-info text-gray-500"></div>
+              <div class="file-pct font-mono text-sm dark:text-gray-200">0%</div>
+              <div class="file-info text-gray-500 dark:text-gray-400"></div>
             </div>
-            <div class="mt-3 file-result"></div>
+            <div class="mt-3 file-result w-full min-w-0"></div>
           </div>
         `;
         previewAll.appendChild(block);
@@ -267,7 +280,6 @@
         };
       });
 
-      // helper to update overall
       function updateOverall() {
         const sum = loadedBytes.reduce((a,b) => a + b, 0);
         const overallPercent = totalBytes ? Math.round((sum / totalBytes) * 100) : 0;
@@ -276,18 +288,14 @@
         overallInfo.textContent = `${humanFileSize(sum)} / ${humanFileSize(totalBytes)}`;
       }
 
-      // start all uploads concurrently
       const uploadPromises = filesArray.map((file, i) => {
         const ui = blocks[i];
         return uploadSingleFile(file, i, {
           onProgress: (loaded, total, speed, secsLeft) => {
-            // update per-file UI
             const percent = total ? Math.round((loaded/total)*100) : 0;
             ui.fileProgressFill.style.width = percent + '%';
             ui.filePct.textContent = percent + '%';
             ui.fileInfo.textContent = `${humanFileSize(loaded)} / ${humanFileSize(total)} • ${Math.round(secsLeft)}s left`;
-
-            // update overall loaded bytes
             loadedBytes[i] = loaded;
             updateOverall();
           },
@@ -299,16 +307,16 @@
             };
           }
         }).then(url => {
-          // success
           loadedBytes[i] = file.size;
           updateOverall();
           ui.fileProgressFill.style.width = '100%';
           ui.filePct.textContent = '100%';
           ui.fileInfo.textContent = `${humanFileSize(file.size)} • Konplete`;
+          ui.fileCancelBtn.classList.add('hidden');
 
           const div = document.createElement('div');
-          div.className = 'mt-2';
-          const urlDisplay = `<div class="break-all text-blue-600 text-xs cursor-pointer file-url">${escapeHtml(url)}</div>`;
+          div.className = 'mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-lg w-full';
+          const urlDisplay = `<div class="file-name text-blue-600 dark:text-blue-400 text-sm font-medium cursor-pointer file-url">${escapeHtml(url)}</div>`;
           div.innerHTML = urlDisplay;
           ui.fileResult.appendChild(div);
 
@@ -323,29 +331,28 @@
             }
           };
 
-          // render preview if image/video/audio
           const type = (file.type || '').toLowerCase();
           if (type.startsWith('image/')) {
             const img = document.createElement('img');
             img.src = url;
-            img.className = 'mt-2 mx-auto rounded-lg shadow max-h-44';
+            img.className = 'mt-3 mx-auto rounded-lg shadow-md max-h-44 object-contain';
             ui.fileResult.appendChild(img);
           } else if (type.startsWith('video/') || type.startsWith('audio/')) {
             const vid = document.createElement('video');
             vid.src = url;
             vid.controls = true;
-            vid.className = 'mt-2 mx-auto rounded-lg shadow max-h-44';
+            vid.className = 'mt-3 mx-auto rounded-lg shadow-md max-h-44 w-full bg-black';
             ui.fileResult.appendChild(vid);
           }
           return { status: 'fulfilled', url };
         }).catch(err => {
-          // error or abort
+          ui.fileCancelBtn.classList.add('hidden');
           if (err && err.isAbort) {
             ui.fileInfo.textContent = '';
             ui.filePct.textContent = '—';
             ui.fileProgressFill.style.width = '0%';
             const errDiv = document.createElement('div');
-            errDiv.className = 'text-xs text-red-600 mt-2';
+            errDiv.className = 'text-sm font-medium text-red-600 dark:text-red-400 mt-2 file-name';
             errDiv.textContent = 'Upload anile pa itilizatè';
             ui.fileResult.appendChild(errDiv);
             return { status: 'aborted' };
@@ -354,7 +361,7 @@
             ui.filePct.textContent = '—';
             ui.fileProgressFill.style.width = '0%';
             const errDiv = document.createElement('div');
-            errDiv.className = 'text-xs text-red-600 mt-2';
+            errDiv.className = 'text-sm font-medium text-red-600 dark:text-red-400 mt-2 file-name';
             errDiv.textContent = 'Erè upload: ' + (err && err.message ? err.message : String(err));
             ui.fileResult.appendChild(errDiv);
             return { status: 'rejected', reason: err };
@@ -362,16 +369,13 @@
         });
       });
 
-      // Wait for all to finish (either success, fail, or abort)
       const results = await Promise.allSettled(uploadPromises);
 
-      // finalize UI
       uploading = false;
       uploadBtn.disabled = false;
       cancelAllBtn.classList.add('hidden');
       fileInput.disabled = false;
 
-      // summary message
       const succeeded = results.filter(r => r.status === 'fulfilled' && r.value && r.value.status === 'fulfilled').length;
       const aborted = results.filter(r => r.status === 'fulfilled' && r.value && r.value.status === 'aborted').length;
       const failed = results.filter(r => r.status === 'fulfilled' && r.value && r.value.status === 'rejected').length;
@@ -379,9 +383,7 @@
       result.textContent = `Fen: ${succeeded} siksè, ${failed} erè, ${aborted} anile.`;
     });
 
-    // cancel all button
     cancelAllBtn.addEventListener('click', () => {
-      // abort all xhrs
       for (const xhr of xhrs.values()) {
         try { xhr.abort(); } catch(e) {}
       }
@@ -389,10 +391,9 @@
       result.textContent = 'Anile tout uploads...';
     });
 
-    // helper: upload single file with progress callbacks
     function uploadSingleFile(file, index, { onProgress = ()=>{}, onXhrCreated = ()=>{} } = {}) {
       return new Promise((resolve, reject) => {
-        const endpoint = `/upload`; // modify si sèvè ou a diferan
+        const endpoint = `/upload`;
         const formData = new FormData();
         formData.append('file', file);
 
@@ -419,13 +420,11 @@
               if (url) {
                 resolve(url);
               } else {
-                // some servers return plain text URL
                 const text = (xhr.responseText || '').trim();
                 if (text) resolve(text);
                 else reject(new Error('Repons sèvè pa gen URL'));
               }
             } catch (err) {
-              // maybe server returned plain text
               const text = (xhr.responseText || '').trim();
               if (text) resolve(text);
               else reject(new Error('Erè parse repons sèvè: ' + err.message));
@@ -447,7 +446,6 @@
           reject(err);
         };
 
-        // expose xhr for cancel
         onXhrCreated(xhr);
 
         try {
@@ -458,28 +456,34 @@
       });
     }
 
-    // service worker register (same as original)
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js')
           .then(reg => {
-            console.log('Service worker registered.', reg);
+            console.log('SW', reg);
           })
           .catch(err => {
-            console.warn('Service worker registration failed:', err);
+            console.warn('SW ERR', err);
           });
       });
     }
   </script>
-<script src="pwa.js"></script>
+  <script src="pwa.js"></script>
   <script>
 (function() {
     const style = document.createElement('style');
     style.textContent = `
         :root {
-            --bg-ui: #000000;
-            --txt-ui: #ffffff;
-            --acc-ui: #333333;
+            --bg-ui: #ffffff;
+            --txt-ui: #000000;
+            --acc-ui: #e5e7eb;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-ui: #0f172a;
+                --txt-ui: #ffffff;
+                --acc-ui: #334155;
+            }
         }
         #int-tab-container-ui {
             position: fixed;
@@ -494,7 +498,7 @@
             display: flex;
             flex-direction: column;
             font-family: sans-serif;
-            box-shadow: 0 -10px 30px rgba(0,0,0,0.8);
+            box-shadow: 0 -10px 30px rgba(0,0,0,0.5);
             overflow: hidden;
         }
         #int-tab-container-ui.active {
@@ -553,7 +557,7 @@
             border: none;
             width: 100%;
             height: 100%;
-            background: #ffffff;
+            background: var(--bg-ui);
             display: block;
             margin: 0;
             padding: 0;
@@ -602,13 +606,8 @@
             'youtube.com', 'youtu.be', 'facebook.com', 'fb.com', 'instagram.com', 
             'gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'mail.google.com',
             'twitter.com', 'x.com', 'linkedin.com', 'tiktok.com', 'snapchat.com', 'whatsapp.com',
-'wa.me',
-'api.whatsapp.com',
-'chat.whatsapp.com',
-'web.whatsapp.com',
-'v.whatsapp.com',
-'business.whatsapp.com',
-            'mailto:'
+            'wa.me', 'api.whatsapp.com', 'chat.whatsapp.com', 'web.whatsapp.com',
+            'v.whatsapp.com', 'business.whatsapp.com', 'mailto:'
         ];
         return patterns.some(p => url.toLowerCase().includes(p));
     }
@@ -778,6 +777,6 @@
     dragHandle.addEventListener('mousedown', dragInit);
     dragHandle.addEventListener('touchstart', dragInit);
 })();
-</script>
+  </script>
 </body>
-  </html>
+</html>
