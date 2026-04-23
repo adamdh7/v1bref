@@ -6,7 +6,7 @@ const compression = require('compression');
 const multer = require('multer');
 const { spawn, spawnSync } = require('child_process');
 const { Readable } = require('stream');
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 
 const PORT = process.env.PORT || 3000;
 const UPLOAD_JSON = path.join(__dirname, 'upload.json');
@@ -28,7 +28,9 @@ const s3 = new S3Client({
     }
 });
 
-try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch(e){}
+try {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+} catch (e) {}
 
 let mappings = {};
 
@@ -51,6 +53,7 @@ function saveMappingsToDisk() {
         fs.renameSync(tmp, UPLOAD_JSON);
     } catch (err) {}
 }
+
 loadMappingsFromDisk();
 
 function genToken() {
@@ -63,7 +66,7 @@ function genToken() {
 function safeFileName(name) {
     const ext = path.extname(name || '');
     const base = path.basename(name || '', ext);
-    const safeBase = base.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0,120);
+    const safeBase = base.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
     const safeExt = ext.replace(/[^a-zA-Z0-9.]/g, '');
     return (safeBase + safeExt) || 'file';
 }
@@ -78,8 +81,6 @@ const FFMPEG_AVAILABLE = (() => {
 })();
 
 function contentTypeFromName(filename) {
-    const ext = path.extname(filename).toLowerCase();
-    function contentTypeFromName(filename) {
     const ext = path.extname(filename).toLowerCase();
     const map = {
         '.png': 'image/png',
@@ -156,7 +157,7 @@ function isImageFile(filename) {
 }
 
 function isAudioFile(filename) {
-    return ['.mp3', '.wav', '.ogg', '.m4a'].includes(path.extname(filename).toLowerCase());
+    return ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.opus'].includes(path.extname(filename).toLowerCase());
 }
 
 function isPdfFile(filename) {
@@ -178,7 +179,7 @@ function getDisplayName(filename) {
 function buildViewerHtml(title, mediaUrl, filename) {
     const safeTitle = String(title).replace(/</g, '&lt;').replace(/>/g, '&gt;');
     let mediaBlock = '';
-    
+
     if (isImageFile(filename)) {
         mediaBlock = `<img src="${mediaUrl}" alt="${safeTitle}" style="display:block;max-width:100vw;max-height:100vh;width:auto;height:auto;object-fit:contain;" />`;
     } else if (isDirectVideoFile(filename) || needsTranscode(filename)) {
@@ -219,8 +220,57 @@ function sendUnknown(req, res) {
     }
 }
 
+async function getRemoteObjectMeta(token) {
+    try {
+        const head = await s3.send(new HeadObjectCommand({
+            Bucket: R2_BUCKET,
+            Key: token
+        }));
+        return {
+            exists: true,
+            contentType: head.ContentType || null,
+            contentLength: head.ContentLength || null,
+            metadata: head.Metadata || {},
+            lastModified: head.LastModified ? new Date(head.LastModified).toISOString() : null
+        };
+    } catch (err) {
+        return null;
+    }
+}
+
+function safeDecodeURIComponent(value) {
+    try {
+        return decodeURIComponent(value);
+    } catch (err) {
+        return value;
+    }
+}
+
+async function ensureMappingFromR2(token, fallbackName) {
+    if (mappings[token]) return mappings[token];
+    const meta = await getRemoteObjectMeta(token);
+    if (!meta || !meta.exists) return null;
+
+    const originalName = safeDecodeURIComponent((meta.metadata && meta.metadata.originalname) || fallbackName || token) || fallbackName || token;
+    const safeOriginal = safeFileName((meta.metadata && meta.metadata.safeoriginal) || originalName || token);
+
+    const entry = {
+        token,
+        originalName,
+        safeOriginal,
+        size: meta.contentLength || null,
+        mime: meta.contentType || null,
+        createdAt: meta.lastModified || new Date().toISOString(),
+        storage: 'r2'
+    };
+
+    mappings[token] = entry;
+    saveMappingsToDisk();
+    return entry;
+}
+
 async function serveRemoteRawFile(req, res, remotePath, filename) {
-    const remoteUrl = `${R2_BASE_URL}/${encodeURIComponent(remotePath)}`;
+    const remoteUrl = `${R2_BASE_URL}/${encodeURIComponent(String(remotePath))}`;
     const headers = {};
     if (req.headers.range) headers.Range = req.headers.range;
 
@@ -259,6 +309,7 @@ function transcodeVideoStreamToMp4(inputStream, res) {
         res.status(415).type('text/plain').send('ffmpeg manquant');
         return;
     }
+
     res.status(200);
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Accept-Ranges', 'none');
@@ -268,23 +319,30 @@ function transcodeVideoStreamToMp4(inputStream, res) {
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1'
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
-    const abort = () => { try { ffmpeg.kill('SIGKILL'); } catch {} };
+    const abort = () => {
+        try { ffmpeg.kill('SIGKILL'); } catch {}
+    };
+
     reqLikeCleanup(inputStream, ffmpeg, res, abort);
 
     inputStream.pipe(ffmpeg.stdin);
     ffmpeg.stdout.pipe(res);
 
     ffmpeg.on('close', code => {
-        if (code !== 0 && !res.headersSent) res.status(415).type('text/plain').send('Erreur conversion');
-        else if (code !== 0 && !res.writableEnded) res.end();
+        if (code !== 0 && !res.headersSent) {
+            res.status(415).type('text/plain').send('Erreur conversion');
+        } else if (code !== 0 && !res.writableEnded) {
+            res.end();
+        }
     });
+
     ffmpeg.on('error', () => {
         if (!res.headersSent) res.status(500).type('text/plain').send('Erreur ffmpeg');
     });
 }
 
 async function serveRemoteVideoTranscode(req, res, remotePath) {
-    const remoteUrl = `${R2_BASE_URL}/${encodeURIComponent(remotePath)}`;
+    const remoteUrl = `${R2_BASE_URL}/${encodeURIComponent(String(remotePath))}`;
     const upstream = await fetch(remoteUrl, { redirect: 'follow' });
     if (!upstream.ok || !upstream.body) return sendUnknown(req, res);
     const inputStream = Readable.fromWeb(upstream.body);
@@ -292,7 +350,9 @@ async function serveRemoteVideoTranscode(req, res, remotePath) {
 }
 
 const app = express();
+
 app.use(cors());
+
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
@@ -302,7 +362,9 @@ app.use((req, res, next) => {
 
 app.use(compression({
     filter: (req, res) => {
-        try { if (req && req.path && req.path.startsWith('/TF-')) return false; } catch(e){}
+        try {
+            if (req && req.path && req.path.startsWith('/TF-')) return false;
+        } catch (e) {}
         return compression.filter(req, res);
     }
 }));
@@ -314,6 +376,7 @@ const multerStorage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, UPLOAD_DIR),
     filename: (req, file, cb) => cb(null, genToken() + '_' + safeFileName(file.originalname))
 });
+
 const upload = multer({ storage: multerStorage, limits: { fileSize: MAX_FILE_SIZE } });
 
 app.post('/upload', upload.single('file'), async (req, res) => {
@@ -324,21 +387,36 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         const originalName = req.file.originalname || 'file';
         const safeOriginal = safeFileName(originalName);
         const entry = {
-            token, originalName, safeOriginal, size: req.file.size,
-            mime: req.file.mimetype, createdAt: new Date().toISOString(), storage: 'r2'
+            token,
+            originalName,
+            safeOriginal,
+            size: req.file.size,
+            mime: req.file.mimetype,
+            createdAt: new Date().toISOString(),
+            storage: 'r2'
         };
 
         const fileStream = fs.createReadStream(req.file.path);
         await s3.send(new PutObjectCommand({
-            Bucket: R2_BUCKET, Key: token, Body: fileStream, ContentType: req.file.mimetype
+            Bucket: R2_BUCKET,
+            Key: token,
+            Body: fileStream,
+            ContentType: req.file.mimetype,
+            Metadata: {
+                originalname: encodeURIComponent(originalName),
+                safeoriginal: safeOriginal,
+                token
+            }
         }));
-        
-        fs.unlinkSync(req.file.path);
+
+        try {
+            fs.unlinkSync(req.file.path);
+        } catch (e) {}
 
         mappings[token] = entry;
         saveMappingsToDisk();
 
-        const origin = process.env.BASE_URL ? process.env.BASE_URL.replace(/\/+$/, '') : 'https://bref.adamdh7.org';
+        const origin = (process.env.BASE_URL || 'https://bref.adamdh7.org').replace(/\/+$/, '');
         const sharePath = `/TF-${token}/${encodeURIComponent(safeOriginal)}`;
         return res.json({ token, url: `${origin}${sharePath}`, sharePath, info: entry });
     } catch (err) {
@@ -347,34 +425,40 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 });
 
 app.get(['/TF-:token', '/TF-:token/:name'], async (req, res) => {
-    const token = req.params.token;
-    if (!mappings[token]) return sendUnknown(req, res);
+    try {
+        const token = req.params.token;
+        const requestedName = req.params.name || null;
+        const entry = await ensureMappingFromR2(token, requestedName);
 
-    const entry = mappings[token];
-    const filename = req.params.name || entry.safeOriginal || 'Mizik';
-    let wantsRaw = req.query.raw === '1';
-    let wantsTranscode = req.query.transcode === '1';
+        if (!entry) return sendUnknown(req, res);
 
-    const isBrowserDoc = req.headers.accept && req.headers.accept.includes('text/html') && !['image', 'video', 'audio'].includes(req.headers['sec-fetch-dest']);
+        const filename = requestedName || entry.safeOriginal || entry.originalName || 'Mizik';
+        let wantsRaw = req.query.raw === '1';
+        let wantsTranscode = req.query.transcode === '1';
 
-    if (!isBrowserDoc && !wantsTranscode) wantsRaw = true;
+        const isBrowserDoc = req.headers.accept && req.headers.accept.includes('text/html') && !['image', 'video', 'audio'].includes(req.headers['sec-fetch-dest']);
 
-    if (!wantsRaw && !wantsTranscode) {
-        const displayName = getDisplayName(filename);
-        const mediaMode = needsTranscode(filename) && FFMPEG_AVAILABLE ? 'transcode' : 'raw';
-        const mediaUrl = `/TF-${token}/${encodeURIComponent(filename)}?${mediaMode}=1`;
-        return res.status(200).type('html').send(buildViewerHtml(displayName, mediaUrl, filename));
+        if (!isBrowserDoc && !wantsTranscode) wantsRaw = true;
+
+        if (!wantsRaw && !wantsTranscode) {
+            const displayName = getDisplayName(filename);
+            const mediaMode = needsTranscode(filename) && FFMPEG_AVAILABLE ? 'transcode' : 'raw';
+            const mediaUrl = `/TF-${token}/${encodeURIComponent(filename)}?${mediaMode}=1`;
+            return res.status(200).type('html').send(buildViewerHtml(displayName, mediaUrl, filename));
+        }
+
+        if (wantsTranscode && needsTranscode(filename) && FFMPEG_AVAILABLE) {
+            return serveRemoteVideoTranscode(req, res, token);
+        }
+
+        return serveRemoteRawFile(req, res, token, filename);
+    } catch (err) {
+        return sendUnknown(req, res);
     }
-
-    if (wantsTranscode && needsTranscode(filename) && FFMPEG_AVAILABLE) {
-        return serveRemoteVideoTranscode(req, res, token);
-    }
-
-    return serveRemoteRawFile(req, res, token, filename);
 });
 
 app.get('/_admin/mappings', (req, res) => {
-    return res.json({ count: Object.keys(mappings).length, tokens: Object.keys(mappings).slice(0,50) });
+    return res.json({ count: Object.keys(mappings).length, tokens: Object.keys(mappings).slice(0, 50) });
 });
 
 app.get('/sitemap.xml', (req, res) => {
@@ -396,7 +480,7 @@ app.get('/poste.json', (req, res) => {
     }
 });
 
-app.get('/health', (req,res) => res.json({ ok: true }));
+app.get('/health', (req, res) => res.json({ ok: true }));
 
 app.get('*', (req, res, next) => {
     if (req.path.startsWith('/TF-') || req.path.startsWith('/upload') || req.path.startsWith('/_admin') || req.path.startsWith('/health')) return next();
@@ -418,12 +502,12 @@ setInterval(async () => {
     const now = Date.now();
     for (const [token, entry] of Object.entries(mappings)) {
         const created = new Date(entry.createdAt).getTime();
-        if (now - created > MAX_AGE_MS) {
+        if (Number.isFinite(created) && now - created > MAX_AGE_MS) {
             try {
                 await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: token }));
                 delete mappings[token];
                 saveMappingsToDisk();
-            } catch(e) {}
+            } catch (e) {}
         }
     }
 }, 3600000);
