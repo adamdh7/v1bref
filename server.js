@@ -7,10 +7,10 @@ const multer = require('multer');
 const { spawn, spawnSync } = require('child_process');
 const { Readable } = require('stream');
 const { S3Client, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const { Upload } = require('@aws-sdk/lib-storage');
 
 const PORT = process.env.PORT || 3000;
 const UPLOAD_JSON = path.join(__dirname, 'upload.json');
-const UPLOAD_DIR = path.join(__dirname, 'uploads');
 
 const MAX_FILE_SIZE = 7 * 1024 * 1024 * 1024;
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -27,10 +27,6 @@ const s3 = new S3Client({
         secretAccessKey: 'de5455c6af1e858d598d94d0de10717493133998d8e9cff54110311f744b266c'
     }
 });
-
-try {
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-} catch (e) {}
 
 let mappings = {};
 
@@ -274,19 +270,25 @@ async function serveRemoteRawFile(req, res, remotePath, filename) {
     const headers = {};
     if (req.headers.range) headers.Range = req.headers.range;
 
-    const upstream = await fetch(remoteUrl, { headers, redirect: 'follow' });
+    const fetchMethod = req.method === 'HEAD' ? 'HEAD' : 'GET';
+
+    const upstream = await fetch(remoteUrl, { method: fetchMethod, headers, redirect: 'follow' });
     if (!upstream.ok && upstream.status !== 206) return sendUnknown(req, res);
 
     const contentType = upstream.headers.get('content-type') || contentTypeFromName(filename);
     const contentLength = upstream.headers.get('content-length');
-    const acceptRanges = upstream.headers.get('accept-ranges');
+    const acceptRanges = upstream.headers.get('accept-ranges') || 'bytes';
     const contentRange = upstream.headers.get('content-range');
 
     res.status(upstream.status === 206 ? 206 : 200);
     res.setHeader('Content-Type', contentType);
+    res.setHeader('Accept-Ranges', acceptRanges);
     if (contentLength) res.setHeader('Content-Length', contentLength);
-    if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
     if (contentRange) res.setHeader('Content-Range', contentRange);
+
+    if (req.method === 'HEAD') {
+        return res.end();
+    }
 
     if (!upstream.body) return res.end();
     const body = Readable.fromWeb(upstream.body);
@@ -343,8 +345,17 @@ function transcodeVideoStreamToMp4(inputStream, res) {
 
 async function serveRemoteVideoTranscode(req, res, remotePath) {
     const remoteUrl = `${R2_BASE_URL}/${encodeURIComponent(String(remotePath))}`;
-    const upstream = await fetch(remoteUrl, { redirect: 'follow' });
+    const fetchMethod = req.method === 'HEAD' ? 'HEAD' : 'GET';
+    const upstream = await fetch(remoteUrl, { method: fetchMethod, redirect: 'follow' });
     if (!upstream.ok || !upstream.body) return sendUnknown(req, res);
+
+    if (req.method === 'HEAD') {
+        res.status(200);
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Accept-Ranges', 'none');
+        return res.end();
+    }
+
     const inputStream = Readable.fromWeb(upstream.body);
     transcodeVideoStreamToMp4(inputStream, res);
 }
@@ -372,46 +383,70 @@ app.use(compression({
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }));
 
-const multerStorage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-    filename: (req, file, cb) => cb(null, genToken() + '_' + safeFileName(file.originalname))
-});
+const multerStorage = {
+    _handleFile: async function(req, file, cb) {
+        const token = genToken();
+        const originalName = file.originalname || 'file';
+        const safeOriginal = safeFileName(originalName);
+        
+        req.uploadToken = token;
+        req.safeOriginal = safeOriginal;
+        req.originalName = originalName;
+
+        let size = 0;
+        file.stream.on('data', chunk => { size += chunk.length; });
+
+        try {
+            const parallelUploads3 = new Upload({
+                client: s3,
+                params: {
+                    Bucket: R2_BUCKET,
+                    Key: token,
+                    Body: file.stream,
+                    ContentType: file.mimetype,
+                    Metadata: {
+                        originalname: encodeURIComponent(originalName),
+                        safeoriginal: safeOriginal,
+                        token
+                    }
+                },
+                queueSize: 4,
+                partSize: 5 * 1024 * 1024
+            });
+
+            await parallelUploads3.done();
+
+            cb(null, {
+                size: size,
+                mimetype: file.mimetype
+            });
+        } catch (err) {
+            cb(err);
+        }
+    },
+    _removeFile: function(req, file, cb) {
+        cb(null);
+    }
+};
 
 const upload = multer({ storage: multerStorage, limits: { fileSize: MAX_FILE_SIZE } });
 
 app.post('/upload', upload.single('file'), async (req, res) => {
     try {
-        if (!req.file) return res.status(400).json({ error: 'Fichier manquant' });
+        if (!req.file && !req.uploadToken) return res.status(400).json({ error: 'Fichier manquant' });
 
-        const token = genToken();
-        const originalName = req.file.originalname || 'file';
-        const safeOriginal = safeFileName(originalName);
+        const token = req.uploadToken;
+        const originalName = req.originalName;
+        const safeOriginal = req.safeOriginal;
         const entry = {
             token,
             originalName,
             safeOriginal,
-            size: req.file.size,
-            mime: req.file.mimetype,
+            size: req.file ? req.file.size : 0,
+            mime: req.file ? req.file.mimetype : 'application/octet-stream',
             createdAt: new Date().toISOString(),
             storage: 'r2'
         };
-
-        const fileStream = fs.createReadStream(req.file.path);
-        await s3.send(new PutObjectCommand({
-            Bucket: R2_BUCKET,
-            Key: token,
-            Body: fileStream,
-            ContentType: req.file.mimetype,
-            Metadata: {
-                originalname: encodeURIComponent(originalName),
-                safeoriginal: safeOriginal,
-                token
-            }
-        }));
-
-        try {
-            fs.unlinkSync(req.file.path);
-        } catch (e) {}
 
         mappings[token] = entry;
         saveMappingsToDisk();
