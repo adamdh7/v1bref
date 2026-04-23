@@ -177,15 +177,15 @@ function buildViewerHtml(title, mediaUrl, filename) {
     let mediaBlock = '';
 
     if (isImageFile(filename)) {
-        mediaBlock = `<img src="${mediaUrl}" alt="${safeTitle}" style="display:block;max-width:100vw;max-height:100vh;width:auto;height:auto;object-fit:contain;outline:none;border:none;" />`;
+        mediaBlock = `<img src="${mediaUrl}" alt="${safeTitle}" style="display:block;max-width:100vw;max-height:100vh;width:auto;height:auto;object-fit:contain;" />`;
     } else if (isDirectVideoFile(filename) || needsTranscode(filename)) {
-        mediaBlock = `<video src="${mediaUrl}" controls autoplay playsinline preload="metadata" style="display:block;max-width:100vw;max-height:100vh;width:auto;height:auto;object-fit:contain;background:#000000;outline:none;border:none;"></video>`;
+        mediaBlock = `<video src="${mediaUrl}" controls autoplay playsinline preload="metadata" style="display:block;max-width:100vw;max-height:100vh;width:auto;height:auto;object-fit:contain;background:#000;"></video>`;
     } else if (isAudioFile(filename)) {
-        mediaBlock = `<audio src="${mediaUrl}" controls autoplay preload="metadata" style="display:block;max-width:min(92vw,900px);width:100%;height:auto;outline:none;border:none;"></audio>`;
+        mediaBlock = `<audio src="${mediaUrl}" controls autoplay preload="metadata" style="display:block;max-width:min(92vw,900px);width:100%;height:auto;"></audio>`;
     } else if (isPdfFile(filename)) {
-        mediaBlock = `<iframe src="${mediaUrl}" style="display:block;width:min(100vw,1200px);height:100vh;border:0;background:#000000;outline:none;"></iframe>`;
+        mediaBlock = `<iframe src="${mediaUrl}" style="display:block;width:min(100vw,1200px);height:100vh;border:0;background:#000;"></iframe>`;
     } else {
-        mediaBlock = `<a href="${mediaUrl}" style="color:#ffffff;font-family:Arial,sans-serif;word-break:break-all;text-decoration:none;font-size:18px;outline:none;">${mediaUrl}</a>`;
+        mediaBlock = `<a href="${mediaUrl}" style="color:#fff;font-family:Arial,sans-serif;word-break:break-all;text-decoration:none;font-size:18px;">${mediaUrl}</a>`;
     }
 
     return `<!doctype html>
@@ -199,12 +199,10 @@ function buildViewerHtml(title, mediaUrl, filename) {
 <link rel="apple-touch-icon" href="${ICON_URL}">
 <meta name="theme-color" content="#000000">
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #000000; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
 body { display: flex; align-items: center; justify-content: center; }
-#wrap { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000000; }
+#wrap { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
 #wrap > * { max-width: 100vw; max-height: 100vh; }
-video::-webkit-media-controls-panel { background-color: rgba(0, 0, 0, 0.7); }
 </style>
 </head>
 <body><div id="wrap">${mediaBlock}</div></body></html>`;
@@ -212,7 +210,7 @@ video::-webkit-media-controls-panel { background-color: rgba(0, 0, 0, 0.7); }
 
 function sendUnknown(req, res) {
     if (req.headers.accept && req.headers.accept.includes('text/html')) {
-        res.status(404).send('<!doctype html><html lang="fr"><head><meta charset="UTF-8"><title>Inconnu</title></head><body style="background:#000000;color:#ffffff;text-align:center;padding:50px;font-family:sans-serif;"><h1>Inconnu</h1><script>setTimeout(function(){ window.close(); window.history.back(); }, 1500);</script></body></html>');
+        res.status(404).send('<!doctype html><html lang="fr"><head><meta charset="UTF-8"><title>Inconnu</title></head><body style="background:#000;color:#fff;text-align:center;padding:50px;font-family:sans-serif;"><h1>Inconnu</h1><script>setTimeout(function(){ window.close(); window.history.back(); }, 1500);</script></body></html>');
     } else {
         res.status(404).send('Inconnu');
     }
@@ -270,62 +268,31 @@ async function ensureMappingFromR2(token, fallbackName) {
 async function serveRemoteRawFile(req, res, remotePath, filename) {
     const remoteUrl = `${R2_BASE_URL}/${encodeURIComponent(String(remotePath))}`;
     const headers = {};
-    
     if (req.headers.range) headers.Range = req.headers.range;
-    if (req.headers['if-none-match']) headers['If-None-Match'] = req.headers['if-none-match'];
-    if (req.headers['if-modified-since']) headers['If-Modified-Since'] = req.headers['if-modified-since'];
 
     const fetchMethod = req.method === 'HEAD' ? 'HEAD' : 'GET';
-    const controller = new AbortController();
 
-    req.on('close', () => {
-        controller.abort();
-    });
+    const upstream = await fetch(remoteUrl, { method: fetchMethod, headers, redirect: 'follow' });
+    if (!upstream.ok && upstream.status !== 206) return sendUnknown(req, res);
 
-    try {
-        const upstream = await fetch(remoteUrl, { 
-            method: fetchMethod, 
-            headers, 
-            redirect: 'follow',
-            signal: controller.signal 
-        });
+    const contentType = upstream.headers.get('content-type') || contentTypeFromName(filename);
+    const contentLength = upstream.headers.get('content-length');
+    const acceptRanges = upstream.headers.get('accept-ranges') || 'bytes';
+    const contentRange = upstream.headers.get('content-range');
 
-        if (upstream.status === 304) {
-            return res.status(304).end();
-        }
+    res.status(upstream.status === 206 ? 206 : 200);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Accept-Ranges', acceptRanges);
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+    if (contentRange) res.setHeader('Content-Range', contentRange);
 
-        if (!upstream.ok && upstream.status !== 206) return sendUnknown(req, res);
-
-        const contentType = upstream.headers.get('content-type') || contentTypeFromName(filename);
-        const contentLength = upstream.headers.get('content-length');
-        const acceptRanges = upstream.headers.get('accept-ranges') || 'bytes';
-        const contentRange = upstream.headers.get('content-range');
-        const etag = upstream.headers.get('etag');
-        const lastModified = upstream.headers.get('last-modified');
-        const cacheControl = upstream.headers.get('cache-control');
-
-        res.status(upstream.status === 206 ? 206 : 200);
-        res.setHeader('Content-Type', contentType);
-        res.setHeader('Accept-Ranges', acceptRanges);
-        
-        if (contentLength) res.setHeader('Content-Length', contentLength);
-        if (contentRange) res.setHeader('Content-Range', contentRange);
-        if (etag) res.setHeader('ETag', etag);
-        if (lastModified) res.setHeader('Last-Modified', lastModified);
-        if (cacheControl) res.setHeader('Cache-Control', cacheControl);
-
-        if (req.method === 'HEAD') {
-            return res.end();
-        }
-
-        if (!upstream.body) return res.end();
-        
-        const body = Readable.fromWeb(upstream.body);
-        body.pipe(res);
-    } catch (err) {
-        if (err.name === 'AbortError') return;
-        if (!res.headersSent) res.status(500).send('Erreur Serveur');
+    if (req.method === 'HEAD') {
+        return res.end();
     }
+
+    if (!upstream.body) return res.end();
+    const body = Readable.fromWeb(upstream.body);
+    body.pipe(res);
 }
 
 function reqLikeCleanup(inputStream, ffmpeg, res, abort) {
@@ -379,32 +346,18 @@ function transcodeVideoStreamToMp4(inputStream, res) {
 async function serveRemoteVideoTranscode(req, res, remotePath) {
     const remoteUrl = `${R2_BASE_URL}/${encodeURIComponent(String(remotePath))}`;
     const fetchMethod = req.method === 'HEAD' ? 'HEAD' : 'GET';
-    
-    const controller = new AbortController();
-    req.on('close', () => controller.abort());
+    const upstream = await fetch(remoteUrl, { method: fetchMethod, redirect: 'follow' });
+    if (!upstream.ok || !upstream.body) return sendUnknown(req, res);
 
-    try {
-        const upstream = await fetch(remoteUrl, { 
-            method: fetchMethod, 
-            redirect: 'follow',
-            signal: controller.signal 
-        });
-        
-        if (!upstream.ok || !upstream.body) return sendUnknown(req, res);
-
-        if (req.method === 'HEAD') {
-            res.status(200);
-            res.setHeader('Content-Type', 'video/mp4');
-            res.setHeader('Accept-Ranges', 'none');
-            return res.end();
-        }
-
-        const inputStream = Readable.fromWeb(upstream.body);
-        transcodeVideoStreamToMp4(inputStream, res);
-    } catch (err) {
-        if (err.name === 'AbortError') return;
-        if (!res.headersSent) res.status(500).send('Erreur Serveur');
+    if (req.method === 'HEAD') {
+        res.status(200);
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Accept-Ranges', 'none');
+        return res.end();
     }
+
+    const inputStream = Readable.fromWeb(upstream.body);
+    transcodeVideoStreamToMp4(inputStream, res);
 }
 
 const app = express();
