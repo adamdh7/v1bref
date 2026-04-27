@@ -94,6 +94,7 @@ function contentTypeFromName(filename) {
         '.mp4': 'video/mp4',
         '.webm': 'video/webm',
         '.mov': 'video/quicktime',
+        '.quicktime': 'video/quicktime',
         '.mkv': 'video/x-matroska',
         '.avi': 'video/x-msvideo',
         '.wmv': 'video/x-ms-wmv',
@@ -161,7 +162,7 @@ function isPdfFile(filename) {
 }
 
 function isDirectVideoFile(filename) {
-    return ['.mp4', '.webm', '.m4v', '.mov', '.ogg', '.ogv'].includes(path.extname(filename).toLowerCase());
+    return ['.mp4', '.webm', '.m4v', '.mov', '.ogg', '.ogv', '.quicktime'].includes(path.extname(filename).toLowerCase());
 }
 
 function needsTranscode(filename) {
@@ -179,9 +180,9 @@ function buildViewerHtml(title, mediaUrl, filename) {
     if (isImageFile(filename)) {
         mediaBlock = `<img src="${mediaUrl}" alt="${safeTitle}" style="display:block;max-width:100vw;max-height:100vh;width:auto;height:auto;object-fit:contain;" />`;
     } else if (isDirectVideoFile(filename) || needsTranscode(filename)) {
-        mediaBlock = `<video src="${mediaUrl}" controls autoplay playsinline preload="metadata" style="display:block;max-width:100vw;max-height:100vh;width:auto;height:auto;object-fit:contain;background:#000;"></video>`;
+        mediaBlock = `<video src="${mediaUrl}" controls autoplay playsinline preload="auto" style="display:block;max-width:100vw;max-height:100vh;width:auto;height:auto;object-fit:contain;background:#000;"></video>`;
     } else if (isAudioFile(filename)) {
-        mediaBlock = `<audio src="${mediaUrl}" controls autoplay preload="metadata" style="display:block;max-width:min(92vw,900px);width:100%;height:auto;"></audio>`;
+        mediaBlock = `<audio src="${mediaUrl}" controls autoplay preload="auto" style="display:block;max-width:min(92vw,900px);width:100%;height:auto;"></audio>`;
     } else if (isPdfFile(filename)) {
         mediaBlock = `<iframe src="${mediaUrl}" style="display:block;width:min(100vw,1200px);height:100vh;border:0;background:#000;"></iframe>`;
     } else {
