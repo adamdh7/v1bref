@@ -252,6 +252,17 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   html,body{width:100%;height:100%;margin:0;padding:0;background:var(--bg);color:var(--accent);font-family:Inter,system-ui,Arial,sans-serif;overflow:hidden;}
   .wrap, .video-card, .controls-wrap, .inside-mini-controls { user-select:none; -webkit-user-select:none; -ms-user-select:none; -moz-user-select:none; }
   .wrap{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;}
+  
+  /* Fallback mode if native fullscreen is blocked by iframe */
+  .wrap.css-fullscreen {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 99999 !important;
+    background: #000;
+  }
+
   .video-card{position:absolute;inset:0;border-radius:0;overflow:hidden;background:#000;width:100%;height:100%;touch-action:none}
   video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;background:#000;transition:filter .08s linear}
   .controls-wrap{position:absolute;left:12px;right:12px;bottom:12px;pointer-events:none;z-index:12;transition:opacity .25s ease;filter:drop-shadow(0px 2px 8px rgba(0,0,0,0.8));}
@@ -402,7 +413,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
 </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="wrap" id="mainWrap">
     <div class="video-card" id="card">
       <video id="video" preload="auto" playsinline crossorigin="anonymous">
         <source src="${safeTargetUrl}" type="${safeMime}">
@@ -453,11 +464,15 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   </div>
 <script>
 (function(){
+  const mainWrap = document.getElementById('mainWrap');
   const card = document.getElementById('card');
   const video = document.getElementById('video');
   const insidePlay = document.getElementById('insidePlay');
   const insideForward = document.getElementById('insideForward');
   const insideBack = document.getElementById('insideBack');
+  const backContainer = document.getElementById('backContainer');
+  const playContainer = document.getElementById('playContainer');
+  const forwardContainer = document.getElementById('forwardContainer');
   const spinnerContainer = document.getElementById('spinnerContainer');
   const seekBar = document.getElementById('seekBar');
   const fill = document.getElementById('fill');
@@ -485,6 +500,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
 
   const cornerRatio = 0.25;
   let hideTimeout = null;
+  let isCssFullscreen = false;
 
   function isIOSDevice() {
     return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -499,7 +515,12 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     return m + ":" + String(s).padStart(2,'0');
   }
 
-  function isFullscreenCard(){ return document.fullscreenElement === card || document.webkitFullscreenElement === card || video.webkitDisplayingFullscreen; }
+  function isFullscreenCard(){ 
+    return document.fullscreenElement === card || 
+           document.webkitFullscreenElement === card || 
+           video.webkitDisplayingFullscreen || 
+           isCssFullscreen; 
+  }
 
   function isWideVideo() {
     return video.videoWidth > 0 && video.videoHeight > 0 && (video.videoWidth / video.videoHeight) > 1.2;
@@ -509,6 +530,16 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     if (video.muted) {
       video.muted = false;
     }
+  }
+  
+  // Fonction globale d'actualisation instantanée de l'UI
+  function updateUIForTime(time) {
+    currentEl.textContent = formatTime(time);
+    const dur = video.duration || 1;
+    const pct = (time / dur) * 100;
+    fill.style.width = pct + '%';
+    thumb.style.left = pct + '%';
+    seekBar.setAttribute('aria-valuenow', Math.floor(time || 0));
   }
 
   async function tryAutoplay(){
@@ -531,17 +562,34 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     try{ if(video.paused){ try{ video.muted = false; } catch(e){} await video.play(); } else video.pause(); } catch(e){} updatePlayIcon(); }
   insidePlay.addEventListener('click', (e)=>{ e.stopPropagation(); togglePlay(); resetHideTimer(); });
 
-  insideForward.addEventListener('click', (e)=>{ e.stopPropagation(); unmuteVideo(); video.currentTime = Math.min(video.duration || 0, video.currentTime + 10); resetHideTimer(); });
-  insideBack.addEventListener('click', (e)=>{ e.stopPropagation(); unmuteVideo(); video.currentTime = Math.max(0, video.currentTime - 10); resetHideTimer(); });
+  insideForward.addEventListener('click', (e)=>{ 
+    e.stopPropagation(); 
+    unmuteVideo(); 
+    const targetTime = Math.min(video.duration || 0, video.currentTime + 10);
+    video.currentTime = targetTime; 
+    updateUIForTime(targetTime); // Affichage direct du temps, sans attendre
+    resetHideTimer(); 
+  });
+  
+  insideBack.addEventListener('click', (e)=>{ 
+    e.stopPropagation(); 
+    unmuteVideo(); 
+    const targetTime = Math.max(0, video.currentTime - 10);
+    video.currentTime = targetTime; 
+    updateUIForTime(targetTime); // Affichage direct du temps, sans attendre
+    resetHideTimer(); 
+  });
 
   let scrubbing = false;
   let wasPlayingBeforeScrub = false;
+  
   function timeFromClientX(clientX){
     const r = seekBar.getBoundingClientRect();
     let p = (clientX - r.left) / r.width;
     p = Math.max(0, Math.min(1, p));
     return (video.duration || 0) * p;
   }
+  
   function startScrub(clientX){
     unmuteVideo();
     wasPlayingBeforeScrub = !video.paused;
@@ -549,22 +597,18 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     scrubbing = true;
     const t = timeFromClientX(clientX);
     video.currentTime = t;
-    currentEl.textContent = formatTime(t);
-    const pct = (t / (video.duration || 1)) * 100;
-    fill.style.width = pct + '%';
-    thumb.style.left = pct + '%';
+    updateUIForTime(t);
     resetHideTimer();
   }
+  
   function moveScrub(clientX){
     if(!scrubbing) return;
     const t = timeFromClientX(clientX);
     video.currentTime = t;
-    currentEl.textContent = formatTime(t);
-    const pct = (t / (video.duration || 1)) * 100;
-    fill.style.width = pct + '%';
-    thumb.style.left = pct + '%';
+    updateUIForTime(t);
     resetHideTimer();
   }
+  
   function endScrub(){
     if(!scrubbing) return;
     scrubbing = false;
@@ -585,12 +629,11 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   window.addEventListener('pointerup', (e)=>{ endScrub(); });
 
   video.addEventListener('timeupdate', ()=> {
-    currentEl.textContent = formatTime(video.currentTime);
-    const pct = (video.currentTime / (video.duration || 1)) * 100;
-    fill.style.width = pct + '%';
-    thumb.style.left = pct + '%';
-    seekBar.setAttribute('aria-valuenow', Math.floor(video.currentTime || 0));
+    if (!scrubbing) {
+      updateUIForTime(video.currentTime);
+    }
   });
+  
   video.addEventListener('loadedmetadata', ()=> {
     durationEl.textContent = formatTime(video.duration || 0);
     seekBar.setAttribute('aria-valuemax', Math.floor(video.duration || 0));
@@ -651,12 +694,16 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   function enterLandscapeMode(){
     unmuteVideo();
     const wasPlaying = !video.paused;
+    
+    // Cas spécifique iOS
     if (isIOSDevice() && video.webkitEnterFullscreen) {
       video.webkitEnterFullscreen();
       if(wasPlaying) video.play().catch(()=>{});
       return;
     }
-    const fsPromise = card.requestFullscreen ? card.requestFullscreen() : (card.webkitRequestFullscreen ? card.webkitRequestFullscreen() : Promise.reject());
+    
+    const fsPromise = card.requestFullscreen ? card.requestFullscreen() : (card.webkitRequestFullscreen ? card.webkitRequestFullscreen() : Promise.reject(new Error("No FS API")));
+    
     fsPromise.then(() => {
       if (isWideVideo() && screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('landscape').catch(()=>{});
@@ -664,18 +711,40 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
       card.classList.add('landscape-mode');
       if(wasPlaying) video.play().catch(()=>{});
       showAll();
-    }).catch(()=>{});
+    }).catch((err) => {
+      // FALLBACK : S'exécute si le plein écran est bloqué (Iframe sans allow="fullscreen" ou restriction navigateur)
+      if (video.webkitEnterFullscreen) {
+          video.webkitEnterFullscreen();
+      } else {
+          mainWrap.classList.add('css-fullscreen');
+          isCssFullscreen = true;
+          landscapeBtn.innerHTML = svgFullscreenExit;
+      }
+      card.classList.add('landscape-mode');
+      if(wasPlaying) video.play().catch(()=>{});
+      showAll();
+    });
   }
 
   function exitLandscapeMode(){
     const wasPlaying = !video.paused;
-    try{
-      if (screen.orientation && screen.orientation.unlock) {
-        try { screen.orientation.unlock(); } catch(_) {}
-      }
-      if (document.exitFullscreen) document.exitFullscreen().catch(()=>{});
-      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-    }catch(err){}
+    
+    // Sortie du FALLBACK
+    if (isCssFullscreen) {
+       mainWrap.classList.remove('css-fullscreen');
+       isCssFullscreen = false;
+       landscapeBtn.innerHTML = svgFullscreenEnter;
+    } else {
+       // Sortie Classique
+       try{
+         if (screen.orientation && screen.orientation.unlock) {
+           try { screen.orientation.unlock(); } catch(_) {}
+         }
+         if (document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+         else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+       }catch(err){}
+    }
+    
     card.classList.remove('landscape-mode');
     if(wasPlaying) video.play().catch(()=>{});
     showAll();
@@ -698,6 +767,8 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     } else {
       card.classList.remove('landscape-mode');
       landscapeBtn.innerHTML = svgFullscreenEnter;
+      isCssFullscreen = false;
+      mainWrap.classList.remove('css-fullscreen');
       showAll();
     }
   });
@@ -811,10 +882,16 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   }, {passive:true});
 
   function showBuffering() {
+    if(backContainer) backContainer.style.display = 'none';
+    if(playContainer) playContainer.style.display = 'none';
+    if(forwardContainer) forwardContainer.style.display = 'none';
     spinnerContainer.style.display = 'flex';
   }
 
   function hideBuffering() {
+    if(backContainer) backContainer.style.display = 'flex';
+    if(playContainer) playContainer.style.display = 'flex';
+    if(forwardContainer) forwardContainer.style.display = 'flex';
     spinnerContainer.style.display = 'none';
   }
 
