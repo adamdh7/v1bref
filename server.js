@@ -9,13 +9,13 @@ const { S3Client, DeleteObjectCommand, HeadObjectCommand } = require('@aws-sdk/c
 const { Upload } = require('@aws-sdk/lib-storage');
 
 process.on('uncaughtException', (err) => {
-    console.error(err);
+    console.error('Uncaught Exception:', err);
 });
 process.on('unhandledRejection', (reason) => {
-    console.error(reason);
+    console.error('Unhandled Rejection:', reason);
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 const UPLOAD_JSON = path.join(__dirname, 'upload.json');
 
 const MAX_FILE_SIZE = 7 * 1024 * 1024 * 1024;
@@ -176,7 +176,7 @@ function wantsHtmlPreview(req) {
     const accept = String(req.headers.accept || '').toLowerCase();
     const dest = String(req.headers['sec-fetch-dest'] || '').toLowerCase();
     if (dest === 'video' || dest === 'audio' || dest === 'image' || dest === 'empty') return false;
-    if (dest === 'document' || dest === 'iframe' || dest === 'object') return true;
+    if (dest === 'document' || dest === 'iframe' || dest === 'object' || dest === 'embed') return true;
     if (accept.includes('text/html')) return true;
     return false;
 }
@@ -263,6 +263,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   .thumb{position:absolute;top:50%;transform:translate(-50%,-50%);width:18px;height:18px;border-radius:50%;background:#ffffff;box-shadow:0px 1px 4px rgba(0,0,0,0.8);pointer-events:auto;touch-action:none}
   .controls-hidden{opacity:0;pointer-events:none}
   .controls-visible{opacity:1;pointer-events:auto}
+  
   .inside-mini-controls{
     position:absolute;
     left:12px;
@@ -325,6 +326,16 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   .swipe-indicator-right { right: 40px; }
   .swipe-indicator-left.show, .swipe-indicator-right.show { opacity:1; }
   .swipe-icon{width:26px;height:26px;}
+
+  .spinner-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 15;
+    pointer-events: none;
+  }
   .spinner {
     animation: rotate 2s linear infinite;
     width: 50px;
@@ -344,6 +355,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     50% { stroke-dasharray: 90, 150; stroke-dashoffset: -35; }
     100% { stroke-dasharray: 90, 150; stroke-dashoffset: -124; }
   }
+  
   #errorOverlay {
     display: none;
     position: absolute;
@@ -403,16 +415,19 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
           </div>
         </div>
       </div>
-      <div class="inside-mini-controls inside-visible" id="insideMini">
-        <div class="inside-item" id="backContainer" style="display:none;"><button class="mini-btn" id="insideBack">-10</button></div>
-        <div class="inside-item" id="playContainer" style="display:none;"><button class="mini-btn" id="insidePlay">❚❚</button></div>
-        <div class="inside-item" id="spinnerContainer" style="display:flex;">
-          <svg class="spinner" viewBox="0 0 50 50">
-            <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
-          </svg>
-        </div>
-        <div class="inside-item" id="forwardContainer" style="display:none;"><button class="mini-btn" id="insideForward">+10</button></div>
+
+      <div class="spinner-overlay" id="spinnerContainer" style="display:flex;">
+        <svg class="spinner" viewBox="0 0 50 50">
+          <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
+        </svg>
       </div>
+
+      <div class="inside-mini-controls inside-visible" id="insideMini">
+        <div class="inside-item" id="backContainer"><button class="mini-btn" id="insideBack">-10</button></div>
+        <div class="inside-item" id="playContainer"><button class="mini-btn" id="insidePlay">❚❚</button></div>
+        <div class="inside-item" id="forwardContainer"><button class="mini-btn" id="insideForward">+10</button></div>
+      </div>
+      
       <div class="controls-wrap controls-visible" id="controlsWrap">
         <div class="time-row" id="timeRow">
           <div class="time" id="current">0:00</div>
@@ -443,9 +458,6 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   const insidePlay = document.getElementById('insidePlay');
   const insideForward = document.getElementById('insideForward');
   const insideBack = document.getElementById('insideBack');
-  const backContainer = document.getElementById('backContainer');
-  const playContainer = document.getElementById('playContainer');
-  const forwardContainer = document.getElementById('forwardContainer');
   const spinnerContainer = document.getElementById('spinnerContainer');
   const seekBar = document.getElementById('seekBar');
   const fill = document.getElementById('fill');
@@ -475,7 +487,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   let hideTimeout = null;
 
   function isIOSDevice() {
-    return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   }
 
   function formatTime(sec){
@@ -487,7 +499,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     return m + ":" + String(s).padStart(2,'0');
   }
 
-  function isFullscreenCard(){ return document.fullscreenElement === card || document.webkitFullscreenElement === card; }
+  function isFullscreenCard(){ return document.fullscreenElement === card || document.webkitFullscreenElement === card || video.webkitDisplayingFullscreen; }
 
   function isWideVideo() {
     return video.videoWidth > 0 && video.videoHeight > 0 && (video.videoWidth / video.videoHeight) > 1.2;
@@ -636,49 +648,47 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     el.addEventListener('touchstart', e=>e.stopPropagation(), {passive:false});
   });
 
-  async function enterLandscapeMode(){
+  function enterLandscapeMode(){
     unmuteVideo();
     const wasPlaying = !video.paused;
-    if (isIOSDevice()) {
-      if (video.webkitEnterFullscreen) {
-        try {
-          await video.webkitEnterFullscreen();
-        } catch (err) {}
-      }
+    if (isIOSDevice() && video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+      if(wasPlaying) video.play().catch(()=>{});
       return;
     }
-    try{
-      const el = card;
-      if (el.requestFullscreen) await el.requestFullscreen();
-      else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+    const fsPromise = card.requestFullscreen ? card.requestFullscreen() : (card.webkitRequestFullscreen ? card.webkitRequestFullscreen() : Promise.reject());
+    fsPromise.then(() => {
       if (isWideVideo() && screen.orientation && screen.orientation.lock) {
-        try { await screen.orientation.lock('landscape'); } catch(_) {}
+        screen.orientation.lock('landscape').catch(()=>{});
       }
-    }catch(err){}
-    card.classList.add('landscape-mode');
-    if(wasPlaying) {
-        try { await video.play(); } catch(err){}
-    }
-    showAll();
+      card.classList.add('landscape-mode');
+      if(wasPlaying) video.play().catch(()=>{});
+      showAll();
+    }).catch(()=>{});
   }
 
-  async function exitLandscapeMode(){
+  function exitLandscapeMode(){
     const wasPlaying = !video.paused;
     try{
       if (screen.orientation && screen.orientation.unlock) {
         try { screen.orientation.unlock(); } catch(_) {}
       }
-      if (document.exitFullscreen) await document.exitFullscreen();
-      else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
+      if (document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
     }catch(err){}
     card.classList.remove('landscape-mode');
-    if(wasPlaying) {
-        try { await video.play(); } catch(err){}
-    }
+    if(wasPlaying) video.play().catch(()=>{});
     showAll();
   }
   
-  landscapeBtn.addEventListener('click', async (e)=>{ e.stopPropagation(); if(!isFullscreenCard()){ await enterLandscapeMode(); } else { await exitLandscapeMode(); } });
+  landscapeBtn.addEventListener('click', (e)=>{ 
+    e.stopPropagation(); 
+    if(!isFullscreenCard()){ 
+      enterLandscapeMode(); 
+    } else { 
+      exitLandscapeMode(); 
+    } 
+  });
 
   document.addEventListener('fullscreenchange', ()=> {
     if(document.fullscreenElement === card) {
@@ -801,16 +811,10 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   }, {passive:true});
 
   function showBuffering() {
-    backContainer.style.display = 'none';
-    playContainer.style.display = 'none';
-    forwardContainer.style.display = 'none';
     spinnerContainer.style.display = 'flex';
   }
 
   function hideBuffering() {
-    backContainer.style.display = 'flex';
-    playContainer.style.display = 'flex';
-    forwardContainer.style.display = 'flex';
     spinnerContainer.style.display = 'none';
   }
 
@@ -934,9 +938,21 @@ async function serveRemoteRawFile(req, res, remotePath, filename, options = {}) 
 
     const fetchMethod = req.method === 'HEAD' ? 'HEAD' : 'GET';
     let upstream;
+    const abortController = new AbortController();
+
+    req.on('close', () => {
+        abortController.abort();
+    });
+
     try {
-        upstream = await fetch(remoteUrl, { method: fetchMethod, headers, redirect: 'follow' });
+        upstream = await fetch(remoteUrl, { 
+            method: fetchMethod, 
+            headers, 
+            redirect: 'follow',
+            signal: abortController.signal
+        });
     } catch (err) {
+        if (err.name === 'AbortError') return;
         return sendUnknown(req, res);
     }
     
@@ -956,17 +972,31 @@ async function serveRemoteRawFile(req, res, remotePath, filename, options = {}) 
     }
 
     if (!upstream.body) return res.end();
-    const body = Readable.fromWeb(upstream.body);
-    body.on('error', () => {
+    
+    try {
+        const bodyStream = Readable.fromWeb(upstream.body);
+        bodyStream.pipe(res);
+        
+        bodyStream.on('error', (err) => {
+            if (!res.headersSent) res.status(500);
+            if (!res.writableEnded) res.end();
+        });
+
+        req.on('close', () => {
+            if (bodyStream && typeof bodyStream.destroy === 'function') {
+                bodyStream.destroy();
+            }
+        });
+    } catch (err) {
         if (!res.writableEnded) res.end();
-    });
-    body.pipe(res);
+    }
 }
 
 const app = express();
 
 app.disable('x-powered-by');
 app.use(cors());
+app.options('*', cors()); 
 
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
@@ -1014,8 +1044,8 @@ const multerStorage = {
                         token
                     }
                 },
-                queueSize: 2,
-                partSize: 8 * 1024 * 1024
+                queueSize: 1,
+                partSize: 5 * 1024 * 1024
             });
 
             await parallelUploads3.done();
