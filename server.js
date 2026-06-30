@@ -359,8 +359,9 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     filter:drop-shadow(0px 3px 6px rgba(0,0,0,0.9));
   }
   .inside-item .mini-btn:active{transform:scale(0.85)}
-  .landscape-btn{margin-left:8px;border:none;background:transparent;color:var(--muted);width:30px;height:30px;cursor:pointer;filter:drop-shadow(0px 2px 4px rgba(0,0,0,0.9));display:flex;align-items:center;justify-content:center;}
+  .landscape-btn{margin-left:8px;border:none;background:transparent;color:var(--muted);width:34px;height:34px;cursor:pointer;filter:drop-shadow(0px 2px 4px rgba(0,0,0,0.9));display:flex;align-items:center;justify-content:center;padding:0;-webkit-appearance:none;appearance:none;}
   .landscape-btn:hover{color:var(--accent)}
+  .landscape-btn svg {width:24px;height:24px;}
   .swipe-indicator-left, .swipe-indicator-right {
     position:absolute;
     top:50%;
@@ -538,8 +539,8 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
 
   const svgBrightness = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="26" height="26"><path d="M12 4V2M12 22v-2M4.93 4.93L3.51 3.51M20.49 20.49l-1.42-1.42M4 12H2M22 12h-2M4.93 19.07l-1.42 1.42M20.49 3.51l-1.42 1.42M12 8a4 4 0 100 8 4 4 0 000-8z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const svgVolume = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="26" height="26"><path d="M11 5L6 9H2v6h4l5 4V5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 9a5 5 0 010 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const svgFullscreenEnter = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="100%" height="100%"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>';
-  const svgFullscreenExit = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="100%" height="100%"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>';
+  const svgFullscreenEnter = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:24px;height:24px;"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>';
+  const svgFullscreenExit = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:24px;height:24px;"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>';
   const svgReplay = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="26" height="26" style="margin-top:4px;"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>';
 
   landscapeBtn.innerHTML = svgFullscreenEnter;
@@ -1269,7 +1270,8 @@ app.get(['/TF-:token', '/TF-:token/', '/TF-:token/:name'], async (req, res) => {
 
         if (!entry) return sendUnknown(req, res);
 
-        const filename = requestedName || entry.safeOriginal || entry.originalName || 'file';
+        const realName = entry.safeOriginal || entry.originalName || 'file';
+        const filename = requestedName || realName;
         const isVideo = isVideoFile(filename);
         const isImage = isImageFile(filename);
         const previewable = isImage || isVideo;
@@ -1294,7 +1296,7 @@ app.get(['/TF-:token', '/TF-:token/', '/TF-:token/:name'], async (req, res) => {
         }
 
         if (requestedName && !isValidName) {
-            return serveRemoteRawFile(req, res, token, filename, { inlinePreferred: false, forceDownload: true });
+            return serveRemoteRawFile(req, res, token, realName, { inlinePreferred: false, forceDownload: true });
         }
 
         if (htmlPreview && !downloadRequested && !rawRequested && previewable) {
