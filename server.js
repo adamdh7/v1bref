@@ -159,10 +159,6 @@ function isVideoFile(filename) {
     return ['.mp4', '.webm', '.m4v', '.mov', '.ogg', '.ogv', '.quicktime', '.mkv', '.avi', '.wmv', '.flv', '.3gp', '.ts', '.mpeg', '.mpg', '.m2ts'].includes(path.extname(filename).toLowerCase());
 }
 
-function isPreviewableFile(filename, mime) {
-    return isImageFile(filename) || isVideoFile(filename);
-}
-
 function escapeHtml(text) {
     return String(text)
         .replace(/&/g, '&amp;')
@@ -179,6 +175,58 @@ function wantsHtmlPreview(req) {
     if (dest === 'document' || dest === 'iframe' || dest === 'object' || dest === 'embed') return true;
     if (accept.includes('text/html')) return true;
     return false;
+}
+
+function buildLightweightViewerHtml(title, mediaUrl, downloadUrl, isVideo) {
+    const safeTitle = escapeHtml(title);
+    const mediaBlock = isVideo 
+        ? `<video id="media-element" src="${mediaUrl}" autoplay controls playsinline crossorigin="anonymous"></video>` 
+        : `<img id="media-element" src="${mediaUrl}" alt="${safeTitle}">`;
+    
+    return `<!doctype html>
+<html lang="ht">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${safeTitle}</title>
+<link rel="icon" type="image/png" href="${ICON_URL}">
+<link rel="shortcut icon" type="image/png" href="${ICON_URL}">
+<link rel="apple-touch-icon" href="${ICON_URL}">
+<meta name="theme-color" content="#000000">
+<style>
+html, body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #000; }
+.wrap { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; position: relative; }
+img, video, audio { max-width: 100%; max-height: 100%; object-fit: contain; outline: none; }
+.download-btn {
+  position: absolute; bottom: 30px; z-index: 9999; display: none; background: rgba(255,255,255,0.2); width: 56px; height: 56px; border-radius: 50%; align-items: center; justify-content: center; color: #fff; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.3); transition: opacity 0.3s ease, transform 0.2s ease; cursor: pointer; text-decoration: none;
+}
+.download-btn:active { transform: scale(0.9); }
+.download-btn svg { width: 24px; height: 24px; fill: currentColor; }
+</style>
+</head>
+<body>
+<div class="wrap">${mediaBlock}</div>
+<div style="display:flex; justify-content:center; width:100%;">
+  <a id="download-btn" class="download-btn" href="${downloadUrl}" download="${safeTitle}">
+    <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></svg>
+  </a>
+</div>
+<script>
+function forceDownload() { window.location.href = "${downloadUrl}"; }
+var mediaEl = document.getElementById('media-element');
+var btn = document.getElementById('download-btn');
+if (mediaEl) {
+  mediaEl.addEventListener('error', forceDownload);
+  if (mediaEl.tagName === 'IMG') { btn.style.display = 'flex'; }
+  else {
+    mediaEl.addEventListener('playing', function() { btn.style.display = 'flex'; });
+    mediaEl.addEventListener('loadedmetadata', function() { if (mediaEl.duration && mediaEl.currentTime > 0) { btn.style.display = 'flex'; } });
+    mediaEl.addEventListener('canplay', function() { btn.style.display = 'flex'; });
+  }
+} else { btn.style.display = 'flex'; }
+</script>
+</body>
+</html>`;
 }
 
 function buildViewerHtml(title, mediaUrl, filename) {
@@ -252,8 +300,6 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   html,body{width:100%;height:100%;margin:0;padding:0;background:var(--bg);color:var(--accent);font-family:Inter,system-ui,Arial,sans-serif;overflow:hidden;}
   .wrap, .video-card, .controls-wrap, .inside-mini-controls { user-select:none; -webkit-user-select:none; -ms-user-select:none; -moz-user-select:none; }
   .wrap{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;}
-  
-  /* Fallback mode if native fullscreen is blocked by iframe */
   .wrap.css-fullscreen {
     position: fixed !important;
     inset: 0 !important;
@@ -262,7 +308,6 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     z-index: 99999 !important;
     background: #000;
   }
-
   .video-card{position:absolute;inset:0;border-radius:0;overflow:hidden;background:#000;width:100%;height:100%;touch-action:none}
   video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;background:#000;transition:filter .08s linear}
   .controls-wrap{position:absolute;left:12px;right:12px;bottom:12px;pointer-events:none;z-index:12;transition:opacity .25s ease;filter:drop-shadow(0px 2px 8px rgba(0,0,0,0.8));}
@@ -493,14 +538,16 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
 
   const svgBrightness = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="26" height="26"><path d="M12 4V2M12 22v-2M4.93 4.93L3.51 3.51M20.49 20.49l-1.42-1.42M4 12H2M22 12h-2M4.93 19.07l-1.42 1.42M20.49 3.51l-1.42 1.42M12 8a4 4 0 100 8 4 4 0 000-8z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const svgVolume = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="26" height="26"><path d="M11 5L6 9H2v6h4l5 4V5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 9a5 5 0 010 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const svgFullscreenEnter = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>';
-  const svgFullscreenExit = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>';
+  const svgFullscreenEnter = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="100%" height="100%"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>';
+  const svgFullscreenExit = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="100%" height="100%"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>';
+  const svgReplay = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="26" height="26" style="margin-top:4px;"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>';
 
   landscapeBtn.innerHTML = svgFullscreenEnter;
 
   const cornerRatio = 0.25;
   let hideTimeout = null;
   let isCssFullscreen = false;
+  let isEndedState = false;
 
   function isIOSDevice() {
     return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -532,7 +579,6 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     }
   }
   
-  // Fonction globale d'actualisation instantanée de l'UI
   function updateUIForTime(time) {
     currentEl.textContent = formatTime(time);
     const dur = video.duration || 1;
@@ -540,6 +586,15 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     fill.style.width = pct + '%';
     thumb.style.left = pct + '%';
     seekBar.setAttribute('aria-valuenow', Math.floor(time || 0));
+  }
+
+  function clearEndedState() {
+    if (isEndedState) {
+        isEndedState = false;
+        forwardContainer.style.display = 'flex';
+        updatePlayIcon();
+        resetHideTimer();
+    }
   }
 
   async function tryAutoplay(){
@@ -555,11 +610,30 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     updatePlayIcon();
   }
 
-  function updatePlayIcon(){ insidePlay.textContent = video.paused ? '▶︎' : '❚❚'; }
+  function updatePlayIcon(){ 
+      if (isEndedState) return;
+      insidePlay.textContent = video.paused ? '▶︎' : '❚❚'; 
+  }
 
   async function togglePlay(){
     unmuteVideo();
-    try{ if(video.paused){ try{ video.muted = false; } catch(e){} await video.play(); } else video.pause(); } catch(e){} updatePlayIcon(); }
+    if (isEndedState) {
+        clearEndedState();
+        video.currentTime = 0;
+        try { await video.play(); } catch(e){}
+        return;
+    }
+    try{ 
+        if(video.paused){ 
+            try{ video.muted = false; } catch(e){} 
+            await video.play(); 
+        } else {
+            video.pause();
+        }
+    } catch(e){} 
+    updatePlayIcon(); 
+  }
+
   insidePlay.addEventListener('click', (e)=>{ e.stopPropagation(); togglePlay(); resetHideTimer(); });
 
   insideForward.addEventListener('click', (e)=>{ 
@@ -567,16 +641,17 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     unmuteVideo(); 
     const targetTime = Math.min(video.duration || 0, video.currentTime + 10);
     video.currentTime = targetTime; 
-    updateUIForTime(targetTime); // Affichage direct du temps, sans attendre
+    updateUIForTime(targetTime); 
     resetHideTimer(); 
   });
   
   insideBack.addEventListener('click', (e)=>{ 
     e.stopPropagation(); 
     unmuteVideo(); 
+    clearEndedState();
     const targetTime = Math.max(0, video.currentTime - 10);
     video.currentTime = targetTime; 
-    updateUIForTime(targetTime); // Affichage direct du temps, sans attendre
+    updateUIForTime(targetTime); 
     resetHideTimer(); 
   });
 
@@ -592,6 +667,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   
   function startScrub(clientX){
     unmuteVideo();
+    clearEndedState();
     wasPlayingBeforeScrub = !video.paused;
     try { video.pause(); } catch(e){}
     scrubbing = true;
@@ -638,8 +714,15 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     durationEl.textContent = formatTime(video.duration || 0);
     seekBar.setAttribute('aria-valuemax', Math.floor(video.duration || 0));
   });
-  video.addEventListener('play', updatePlayIcon);
+  video.addEventListener('play', () => { clearEndedState(); updatePlayIcon(); });
   video.addEventListener('pause', updatePlayIcon);
+  video.addEventListener('ended', () => {
+    isEndedState = true;
+    insidePlay.innerHTML = svgReplay;
+    forwardContainer.style.display = 'none';
+    showAll();
+    if (hideTimeout) clearTimeout(hideTimeout);
+  });
 
   function showAll(){
     controlsWrap.classList.remove('controls-hidden');
@@ -666,6 +749,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
 
   function resetHideTimer() {
     if(hideTimeout) clearTimeout(hideTimeout);
+    if(isEndedState) return;
     hideTimeout = setTimeout(() => {
       hideAll();
     }, 4000);
@@ -686,16 +770,14 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
 
   [insidePlay, insideForward, insideBack, seekBar, landscapeBtn].forEach(el=>{
     if(!el) return;
-    el.addEventListener('click', e=>e.stopPropagation());
-    el.addEventListener('pointerdown', e=>e.stopPropagation());
-    el.addEventListener('touchstart', e=>e.stopPropagation(), {passive:false});
+    el.addEventListener('click', e => e.stopPropagation());
+    el.addEventListener('pointerdown', e => e.stopPropagation());
   });
 
   function enterLandscapeMode(){
     unmuteVideo();
     const wasPlaying = !video.paused;
     
-    // Cas spécifique iOS
     if (isIOSDevice() && video.webkitEnterFullscreen) {
       video.webkitEnterFullscreen();
       if(wasPlaying) video.play().catch(()=>{});
@@ -712,7 +794,6 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
       if(wasPlaying) video.play().catch(()=>{});
       showAll();
     }).catch((err) => {
-      // FALLBACK : S'exécute si le plein écran est bloqué (Iframe sans allow="fullscreen" ou restriction navigateur)
       if (video.webkitEnterFullscreen) {
           video.webkitEnterFullscreen();
       } else {
@@ -729,13 +810,11 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   function exitLandscapeMode(){
     const wasPlaying = !video.paused;
     
-    // Sortie du FALLBACK
     if (isCssFullscreen) {
        mainWrap.classList.remove('css-fullscreen');
        isCssFullscreen = false;
        landscapeBtn.innerHTML = svgFullscreenEnter;
     } else {
-       // Sortie Classique
        try{
          if (screen.orientation && screen.orientation.unlock) {
            try { screen.orientation.unlock(); } catch(_) {}
@@ -892,6 +971,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     if(backContainer) backContainer.style.display = 'flex';
     if(playContainer) playContainer.style.display = 'flex';
     if(forwardContainer) forwardContainer.style.display = 'flex';
+    if(isEndedState && forwardContainer) forwardContainer.style.display = 'none';
     spinnerContainer.style.display = 'none';
   }
 
@@ -998,13 +1078,20 @@ function buildRemoteUrl(remotePath) {
     return `${R2_BASE_URL}/${encodeURIComponent(String(remotePath))}`;
 }
 
-function applyDownloadHeaders(res, filename, inlinePreferred, mime, contentLength, contentRange, acceptRanges) {
-    const type = mime || contentTypeFromName(filename);
+function applyDownloadHeaders(res, filename, inlinePreferred, mime, contentLength, contentRange, acceptRanges, forceDownload) {
+    let type = mime || contentTypeFromName(filename);
+    if (forceDownload) {
+        type = 'application/octet-stream';
+    }
     res.setHeader('Content-Type', type);
     res.setHeader('Accept-Ranges', acceptRanges || 'bytes');
     if (contentLength) res.setHeader('Content-Length', contentLength);
     if (contentRange) res.setHeader('Content-Range', contentRange);
-    const dispositionType = inlinePreferred ? 'inline' : 'attachment';
+    
+    let dispositionType = inlinePreferred ? 'inline' : 'attachment';
+    if (forceDownload) {
+        dispositionType = 'attachment';
+    }
     res.setHeader('Content-Disposition', `${dispositionType}; filename="${safeFileName(filename)}"`);
 }
 
@@ -1040,9 +1127,10 @@ async function serveRemoteRawFile(req, res, remotePath, filename, options = {}) 
     const acceptRanges = upstream.headers.get('accept-ranges') || 'bytes';
     const contentRange = upstream.headers.get('content-range');
     const inlinePreferred = Boolean(options.inlinePreferred);
+    const forceDownload = Boolean(options.forceDownload);
 
     res.status(upstream.status === 206 ? 206 : 200);
-    applyDownloadHeaders(res, filename, inlinePreferred, contentType, contentLength, contentRange, acceptRanges);
+    applyDownloadHeaders(res, filename, inlinePreferred, contentType, contentLength, contentRange, acceptRanges, forceDownload);
 
     if (req.method === 'HEAD') {
         return res.end();
@@ -1185,14 +1273,15 @@ app.get(['/TF-:token', '/TF-:token/', '/TF-:token/:name'], async (req, res) => {
         const isVideo = isVideoFile(filename);
         const isImage = isImageFile(filename);
         const previewable = isImage || isVideo;
+        const isValidName = requestedName && (requestedName === entry.safeOriginal || requestedName === entry.originalName);
 
         const rawRequested = req.query.raw === '1';
         const downloadRequested = req.query.download === '1';
         const htmlPreview = wantsHtmlPreview(req);
+        const origin = (process.env.BASE_URL || 'https://bref.adamdh7.org').replace(/\/+$/, '');
 
         if (!requestedName) {
             if (isVideo) {
-                const origin = (process.env.BASE_URL || 'https://bref.adamdh7.org').replace(/\/+$/, '');
                 const targetUrl = `/TF-${token}/${encodeURIComponent(filename)}?raw=1`;
                 const fullUrl = `${origin}/TF-${token}`;
                 return res.status(200).type('html').send(buildCustomPlayerHtml(filename, targetUrl, fullUrl, entry.mime));
@@ -1201,24 +1290,21 @@ app.get(['/TF-:token', '/TF-:token/', '/TF-:token/:name'], async (req, res) => {
                 const targetUrl = `/TF-${token}/${encodeURIComponent(filename)}?raw=1`;
                 return res.status(200).type('html').send(buildViewerHtml(filename, targetUrl, filename));
             }
-            return res.status(403).send('<!doctype html><html lang="ht"><head><meta charset="UTF-8"><title>Aksè refize</title></head><body style="background:#000;color:#fff;text-align:center;padding:50px;font-family:sans-serif;"><h1>Aksè refize san non fichye a</h1></body></html>');
+            return serveRemoteRawFile(req, res, token, filename, { inlinePreferred: false, forceDownload: true });
         }
 
-        if (htmlPreview && !downloadRequested && !rawRequested) {
-            if (isVideo) {
-                const origin = (process.env.BASE_URL || 'https://bref.adamdh7.org').replace(/\/+$/, '');
-                const targetUrl = `/TF-${token}/${encodeURIComponent(filename)}?raw=1`;
-                const fullUrl = `${origin}/TF-${token}/${encodeURIComponent(filename)}`;
-                return res.status(200).type('html').send(buildCustomPlayerHtml(filename, targetUrl, fullUrl, entry.mime));
-            }
-            if (isImage) {
-                const targetUrl = `/TF-${token}/${encodeURIComponent(filename)}?raw=1`;
-                return res.status(200).type('html').send(buildViewerHtml(filename, targetUrl, filename));
-            }
+        if (requestedName && !isValidName) {
+            return serveRemoteRawFile(req, res, token, filename, { inlinePreferred: false, forceDownload: true });
+        }
+
+        if (htmlPreview && !downloadRequested && !rawRequested && previewable) {
+            const targetUrl = `/TF-${token}/${encodeURIComponent(filename)}?raw=1`;
+            const downloadUrl = `/TF-${token}/${encodeURIComponent(filename)}?download=1`;
+            return res.status(200).type('html').send(buildLightweightViewerHtml(filename, targetUrl, downloadUrl, isVideo));
         }
 
         const inlinePreferred = (previewable || rawRequested) && !downloadRequested;
-        return serveRemoteRawFile(req, res, token, filename, { inlinePreferred });
+        return serveRemoteRawFile(req, res, token, filename, { inlinePreferred, forceDownload: !previewable || downloadRequested });
     } catch (err) {
         return sendUnknown(req, res);
     }
