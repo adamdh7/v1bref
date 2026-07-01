@@ -322,15 +322,16 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   
   .inside-mini-controls{
     position:absolute;
-    left:12px;
-    right:12px;
+    left:0;
+    right:0;
     top:50%;
     transform:translateY(-50%);
     z-index:13;
     display:flex;
-    justify-content:center;
-    gap:45px;
-    pointer-events:auto;
+    justify-content:space-between;
+    align-items:center;
+    padding:0 15%;
+    pointer-events:none;
     transition:opacity .25s ease;
   }
   .inside-hidden{opacity:0;pointer-events:none}
@@ -338,10 +339,15 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   .inside-item{
     display:flex;
     align-items:center;
-    justify-content:center;
     background:none;
     border:none;
+    flex:1;
+    pointer-events:auto;
   }
+  #backContainer{justify-content:flex-start;}
+  #playContainer{justify-content:center;}
+  #forwardContainer{justify-content:flex-end;}
+  
   .inside-item .mini-btn{
     width:55px;
     height:55px;
@@ -357,9 +363,13 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     cursor:pointer;
     -webkit-tap-highlight-color: transparent;
     filter:drop-shadow(0px 3px 6px rgba(0,0,0,0.9));
+    -webkit-appearance:none;
+    appearance:none;
+    padding:0;
+    touch-action:manipulation;
   }
   .inside-item .mini-btn:active{transform:scale(0.85)}
-  .landscape-btn{margin-left:8px;border:none;background:transparent;color:var(--muted);width:34px;height:34px;cursor:pointer;filter:drop-shadow(0px 2px 4px rgba(0,0,0,0.9));display:flex;align-items:center;justify-content:center;padding:0;-webkit-appearance:none;appearance:none;}
+  .landscape-btn{margin-left:8px;border:none;background:transparent;color:var(--muted);width:34px;height:34px;cursor:pointer;filter:drop-shadow(0px 2px 4px rgba(0,0,0,0.9));display:flex;align-items:center;justify-content:center;padding:0;-webkit-appearance:none;appearance:none;touch-action:manipulation;}
   .landscape-btn:hover{color:var(--accent)}
   .landscape-btn svg {width:24px;height:24px;}
   .swipe-indicator-left, .swipe-indicator-right {
@@ -541,7 +551,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   const svgVolume = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="26" height="26"><path d="M11 5L6 9H2v6h4l5 4V5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 9a5 5 0 010 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const svgFullscreenEnter = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:24px;height:24px;"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>';
   const svgFullscreenExit = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:24px;height:24px;"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>';
-  const svgReplay = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="26" height="26" style="margin-top:4px;"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>';
+  const svgReplay = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:34px;height:34px;"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>';
 
   landscapeBtn.innerHTML = svgFullscreenEnter;
 
@@ -592,7 +602,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   function clearEndedState() {
     if (isEndedState) {
         isEndedState = false;
-        forwardContainer.style.display = 'flex';
+        forwardContainer.style.visibility = 'visible';
         updatePlayIcon();
         resetHideTimer();
     }
@@ -720,7 +730,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   video.addEventListener('ended', () => {
     isEndedState = true;
     insidePlay.innerHTML = svgReplay;
-    forwardContainer.style.display = 'none';
+    forwardContainer.style.visibility = 'hidden';
     showAll();
     if (hideTimeout) clearTimeout(hideTimeout);
   });
@@ -772,7 +782,6 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   [insidePlay, insideForward, insideBack, seekBar, landscapeBtn].forEach(el=>{
     if(!el) return;
     el.addEventListener('click', e => e.stopPropagation());
-    el.addEventListener('pointerdown', e => e.stopPropagation());
   });
 
   function enterLandscapeMode(){
@@ -962,17 +971,16 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   }, {passive:true});
 
   function showBuffering() {
-    if(backContainer) backContainer.style.display = 'none';
-    if(playContainer) playContainer.style.display = 'none';
-    if(forwardContainer) forwardContainer.style.display = 'none';
+    if(backContainer) backContainer.style.visibility = 'hidden';
+    if(playContainer) playContainer.style.visibility = 'hidden';
+    if(forwardContainer) forwardContainer.style.visibility = 'hidden';
     spinnerContainer.style.display = 'flex';
   }
 
   function hideBuffering() {
-    if(backContainer) backContainer.style.display = 'flex';
-    if(playContainer) playContainer.style.display = 'flex';
-    if(forwardContainer) forwardContainer.style.display = 'flex';
-    if(isEndedState && forwardContainer) forwardContainer.style.display = 'none';
+    if(backContainer) backContainer.style.visibility = 'visible';
+    if(playContainer) playContainer.style.visibility = 'visible';
+    if(forwardContainer) forwardContainer.style.visibility = isEndedState ? 'hidden' : 'visible';
     spinnerContainer.style.display = 'none';
   }
 
