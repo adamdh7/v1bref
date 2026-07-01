@@ -3,22 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Bref.Adam_D'H7</title>
+  <title>Brefs</title>
   
-  <meta name="description" content="Bref.Adam_D'H7, développé par D'H7 | Tergene, permet de générer des URL éphémères rapidement et en toute sécurité." />
+  <meta name="description" content="Brefs, développé par D'H7 | Tergene, permet de générer des URL éphémères rapidement et en toute sécurité." />
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
   <link rel="canonical" href="https://bref.adamdh7.org/" />
   
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://bref.adamdh7.org/" />
-  <meta property="og:title" content="Bref.Adam_D'H7" />
-  <meta property="og:description" content="Bref.Adam_D'H7, développé par D'H7 | Tergene, permet de générer des URL éphémères rapidement et en toute sécurité." />
+  <meta property="og:title" content="Brefs" />
+  <meta property="og:description" content="Brefs, développé par D'H7 | Tergene, permet de générer des URL éphémères rapidement et en toute sécurité." />
   <meta property="og:image" content="https://adamdh7.org/adamdh7.png" />
   
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:url" content="https://bref.adamdh7.org/" />
-  <meta name="twitter:title" content="Bref.Adam_D'H7" />
-  <meta name="twitter:description" content="Bref.Adam_D'H7, développé par D'H7 | Tergene, permet de générer des URL éphémères rapidement et en toute sécurité." />
+  <meta name="twitter:title" content="Brefs" />
+  <meta name="twitter:description" content="Brefs, développé par D'H7 | Tergene, permet de générer des URL éphémères rapidement et en toute sécurité." />
   <meta name="twitter:image" content="https://adamdh7.org/adamdh7.png" />
   
   <link rel="manifest" href="manifest.json" />
@@ -30,7 +30,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Bref" />
+  <meta name="apple-mobile-web-app-title" content="Brefs" />
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -103,10 +103,10 @@
       height: 90px;
     }
     .file-name {
-      word-wrap: break-word;
-      word-break: break-all;
-      white-space: normal;
-      line-height: 1.4;
+      white-space: nowrap;
+      overflow: hidden;
+      display: block;
+      max-width: 100%;
     }
     
     .backdrop {
@@ -221,7 +221,7 @@
               <line x1="3" y1="18" x2="21" y2="18"></line>
           </svg>
       </button>
-      <h1 class="text-4xl sm:text-5xl brand-text text-black dark:text-white uppercase m-0">Bref</h1>
+      <a href="https://www.paypal.com/ncp/payment/JMYBCJ6EZMSAJ" target="_blank" class="text-4xl sm:text-5xl brand-text text-black dark:text-white m-0 cursor-pointer hover:opacity-80 transition-opacity" style="text-decoration: none;">Brefs</a>
       <div style="width: 32px;"></div>
   </header>
 
@@ -309,7 +309,8 @@
         'msg-err-generic': "Erè sanzatann",
         'msg-final-err': "Fen: {s} siksè, {f} erè, {a} anile.",
         'msg-final-ok': "Fen: {s} siksè, 0 erè.",
-        'msg-cancel-all': "Anile tout..."
+        'msg-cancel-all': "Anile tout...",
+        'url-dl': "telechaje"
       },
       fr: {
         'drop-title': "Cliquez ou glissez les fichiers ici",
@@ -328,7 +329,8 @@
         'msg-err-generic': "Erreur inattendue",
         'msg-final-err': "Fin: {s} succès, {f} erreurs, {a} annulés.",
         'msg-final-ok': "Fin: {s} succès, 0 erreur.",
-        'msg-cancel-all': "Annulation totale..."
+        'msg-cancel-all': "Annulation totale...",
+        'url-dl': "telecharger"
       },
       en: {
         'drop-title': "Click or drag files here",
@@ -347,7 +349,8 @@
         'msg-err-generic': "Unexpected error",
         'msg-final-err': "End: {s} success, {f} errors, {a} cancelled.",
         'msg-final-ok': "End: {s} success, 0 error.",
-        'msg-cancel-all': "Cancelling all..."
+        'msg-cancel-all': "Cancelling all...",
+        'url-dl': "download"
       },
       es: {
         'drop-title': "Haz clic o arrastra archivos aquí",
@@ -366,7 +369,8 @@
         'msg-err-generic': "Error inesperado",
         'msg-final-err': "Fin: {s} éxito, {f} errores, {a} cancelados.",
         'msg-final-ok': "Fin: {s} éxito, 0 error.",
-        'msg-cancel-all': "Cancelando todo..."
+        'msg-cancel-all': "Cancelando todo...",
+        'url-dl': "descargar"
       }
     };
 
@@ -447,6 +451,7 @@
     }
 
     function openMenu() {
+        document.body.style.overflow = 'hidden';
         const modal = document.getElementById('settings-modal');
         document.getElementById('backdrop').classList.add('active');
         modal.style.transform = '';
@@ -454,6 +459,7 @@
     }
 
     function closeMenu() {
+        document.body.style.overflow = '';
         document.getElementById('backdrop').classList.remove('active');
         const modal = document.getElementById('settings-modal');
         modal.classList.remove('active');
@@ -529,6 +535,13 @@
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
     }
+
+    function getUIDisplayName(name) {
+      if (name.length > 25) {
+        return name.substring(0, 25) + '....';
+      }
+      return name;
+    }
     
     function updateDynamicTexts() {
         const t = tr[currentLang];
@@ -571,11 +584,11 @@
         icon.textContent = file.type && file.type.startsWith('video') ? 'VID' : 'FILE';
 
         const titleWrap = document.createElement('div');
-        titleWrap.className = 'flex-1 min-w-0 flex flex-col justify-center';
+        titleWrap.className = 'flex-1 min-w-0 flex flex-col justify-center overflow-hidden';
 
         const title = document.createElement('div');
-        title.className = 'file-name selectable text-sm sm:text-base font-bold text-black dark:text-white';
-        title.textContent = file.name;
+        title.className = 'file-name text-sm sm:text-base font-bold text-black dark:text-white';
+        title.textContent = getUIDisplayName(file.name);
 
         const sub = document.createElement('div');
         sub.className = 'text-xs font-medium text-gray-500 mt-1 pointer-events-none';
@@ -654,8 +667,8 @@
         block.className = 'p-5 bg-white dark:bg-[#0a0a0a] border border-gray-200 dark:border-gray-800 rounded-3xl w-full transition-colors';
         block.innerHTML = `
           <div class="flex items-start justify-between gap-3 w-full min-w-0">
-            <div class="flex-1 min-w-0">
-              <div class="font-bold text-sm sm:text-base text-black dark:text-white file-name selectable">${escapeHtml(file.name)}</div>
+            <div class="flex-1 min-w-0 overflow-hidden">
+              <div class="font-bold text-sm sm:text-base text-black dark:text-white file-name">${escapeHtml(getUIDisplayName(file.name))}</div>
               <div class="text-xs font-medium text-gray-500 mt-1 pointer-events-none">${humanFileSize(file.size)}</div>
             </div>
             <div class="flex-shrink-0">
@@ -720,21 +733,36 @@
           ui.fileInfo.classList.add('msg-completed-dynamic');
           ui.fileCancelBtn.classList.add('hidden');
 
-          const div = document.createElement('div');
-          div.className = 'mt-3 p-4 bg-gray-50 dark:bg-[#111111] border border-gray-200 dark:border-gray-800 rounded-2xl w-full flex items-center justify-between gap-2 file-url-container';
+          const match = url.match(/^(.*\/([^\/]+))\/([^\/]+)$/);
+          let url1 = url;
+          let url2 = url;
+          let url3 = url;
+          let url4 = url;
           
-          const urlDiv = document.createElement('div');
-          urlDiv.className = 'selectable text-black dark:text-white text-sm font-bold flex-1 cursor-pointer transition-opacity hover:opacity-75';
-          urlDiv.textContent = url;
-          urlDiv.onclick = () => {
-            navigator.clipboard.writeText(url).then(() => {
-              showToast(tr[currentLang]['msg-copy-ok']);
-            }).catch(() => {
-              showToast(tr[currentLang]['msg-copy-err']);
-            });
-          };
-          div.appendChild(urlDiv);
-          ui.fileResult.appendChild(div);
+          if (match) {
+              url2 = match[1] + '/';
+              url4 = match[2];
+              url3 = url2 + tLive['url-dl'];
+          }
+          
+          const urlsToShow = [url1, url2, url3, url4];
+
+          urlsToShow.forEach(u => {
+              const div = document.createElement('div');
+              div.className = 'mt-3 p-4 bg-gray-50 dark:bg-[#111111] border border-gray-200 dark:border-gray-800 rounded-2xl w-full flex items-center justify-between gap-2 file-url-container';
+              const urlDiv = document.createElement('div');
+              urlDiv.className = 'text-black dark:text-white text-sm font-bold flex-1 cursor-pointer transition-opacity hover:opacity-75 overflow-hidden text-ellipsis whitespace-nowrap';
+              urlDiv.textContent = u;
+              urlDiv.onclick = () => {
+                navigator.clipboard.writeText(u).then(() => {
+                  showToast(tLive['msg-copy-ok']);
+                }).catch(() => {
+                  showToast(tLive['msg-copy-err']);
+                });
+              };
+              div.appendChild(urlDiv);
+              ui.fileResult.appendChild(div);
+          });
 
           const type = (file.type || '').toLowerCase();
           if (type.startsWith('image/')) {
@@ -758,7 +786,7 @@
           ui.fileProgressFill.style.width = '0%';
           
           const errDiv = document.createElement('div');
-          errDiv.className = 'selectable text-sm font-bold text-black dark:text-white mt-3 p-3 bg-gray-200 dark:bg-gray-800 rounded-2xl text-center border border-gray-300 dark:border-gray-700';
+          errDiv.className = 'text-sm font-bold text-black dark:text-white mt-3 p-3 bg-gray-200 dark:bg-gray-800 rounded-2xl text-center border border-gray-300 dark:border-gray-700 selectable';
 
           if (err && err.isAbort) {
             errDiv.textContent = tLive['msg-err-user'];
