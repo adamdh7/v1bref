@@ -1,6 +1,6 @@
 {
-  "name": "Bref",
-  "short_name": "Bref",
+  "name": "Brefs",
+  "short_name": "Brefs",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -11,60 +11,60 @@
       "src": "https://adamdh7.org/adamdh7.png",
       "sizes": "72x72",
       "purpose": "any maskable",
-      "type": "image/jpeg"
+      "type": "image/png"
     },
     {
       "src": "https://adamdh7.org/adamdh7.png",
       "sizes": "96x96",
       "purpose": "maskable",
-      "type": "image/jpeg"
+      "type": "image/png"
     },
     {
       "src": "https://adamdh7.org/adamdh7.png",
       "sizes": "128x128",
       "purpose": "maskable",
-      "type": "image/jpeg"
+      "type": "image/png"
     },
     {
       "src": "https://adamdh7.org/adamdh7.png",
       "sizes": "144x144",
        "purpose": "maskable",
-      "type": "image/jpeg"
+      "type": "image/png"
     },
     {
       "src": "https://adamdh7.org/adamdh7.png",
       "sizes": "152x152",
       "purpose": "maskable",
-      "type": "image/jpeg"
+      "type": "image/png"
     },
     {
       "src": "https://adamdh7.org/adamdh7.png",
       "sizes": "192x192",
       "purpose": "maskable",
-      "type": "image/jpeg"
+      "type": "image/png"
     },
     {
       "src": "https://adamdh7.org/adamdh7.png",
       "sizes": "256x256",
       "purpose": "maskable",
-      "type": "image/jpeg"
+      "type": "image/png"
     },
     {
       "src": "https://adamdh7.org/adamdh7.png",
       "sizes": "384x384",
       "purpose": "maskable",
-      "type": "image/jpeg"
+      "type": "image/png"
     },
     {
       "src": "https://adamdh7.org/adamdh7.png",
       "sizes": "512x512",
       "purpose": "maskable",
-      "type": "image/jpeg"
+      "type": "image/png"
     },
     {
       "src": "https://link.adamdh7.org/TF-H9QXsLnU/IMG*7889.png",
       "sizes": "512x512",
-      "type": "image/jpeg",
+      "type": "image/png",
       "purpose": "maskable"
     }
   ]
