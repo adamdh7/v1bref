@@ -1,7 +1,7 @@
 {
   "name": "server-bref",
   "version": "1.0.0",
-  "description": "TF-Stream-Url server (R2 Cloudflare + Uploads + Streaming + Multi-DB)",
+  "description": "Brefs !",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -20,6 +20,7 @@
     "express": "^4.19.2",
     "fs-extra": "^11.2.0",
     "mime-types": "^2.1.35",
+    "mongoose": "^8.3.0",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "pg": "^8.12.0",
