@@ -7,6 +7,7 @@ const multer = require('multer');
 const { Readable } = require('stream');
 const { S3Client, DeleteObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
+const mongoose = require('mongoose');
 
 process.on('uncaughtException', (err) => {
     console.error('Uncaught Exception:', err);
@@ -16,10 +17,11 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const PORT = process.env.PORT || 10000;
-const UPLOAD_JSON = path.join(__dirname, 'upload.json');
 
 const MAX_FILE_SIZE = 7 * 1024 * 1024 * 1024;
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const LIMIT_R2_BYTES = 7516192768;
+const LIMIT_DB_BYTES = 35651584;
 
 const R2_BASE_URL = 'https://pub-e2d76735e9dd42f2af664d9e64599ca6.r2.dev';
 const ICON_URL = 'https://adamdh7.org/adamdh7.png';
@@ -35,29 +37,37 @@ const s3 = new S3Client({
     }
 });
 
-let mappings = {};
+mongoose.connect('mongodb+srv://adamdh7:Tchengy1@botadamdh7.lo27bbm.mongodb.net/brefs?appName=brefs');
 
-function loadMappingsFromDisk() {
+const fileSchema = new mongoose.Schema({
+    token: { type: String, unique: true },
+    originalName: String,
+    safeOriginal: String,
+    size: Number,
+    mime: String,
+    createdAt: { type: Date, default: Date.now },
+    storage: String
+});
+const FileModel = mongoose.model('File', fileSchema);
+
+const statusSchema = new mongoose.Schema({
+    key: { type: String, unique: true },
+    totalSize: Number,
+    lastWipe: Date
+});
+const StatusModel = mongoose.model('Status', statusSchema);
+
+async function triggerBackgroundWipe(wipeTime) {
     try {
-        if (fs.existsSync(UPLOAD_JSON)) {
-            mappings = JSON.parse(fs.readFileSync(UPLOAD_JSON, 'utf8') || '{}');
-        } else {
-            mappings = {};
+        const filesToWipe = await FileModel.find({ createdAt: { $lt: wipeTime } });
+        for (const file of filesToWipe) {
+            try {
+                await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: file.token }));
+            } catch(e) {}
+            await FileModel.deleteOne({ _id: file._id });
         }
-    } catch (err) {
-        mappings = {};
-    }
+    } catch(e) {}
 }
-
-function saveMappingsToDisk() {
-    try {
-        const tmp = UPLOAD_JSON + '.tmp';
-        fs.writeFileSync(tmp, JSON.stringify(mappings, null, 2));
-        fs.renameSync(tmp, UPLOAD_JSON);
-    } catch (err) {}
-}
-
-loadMappingsFromDisk();
 
 function genToken() {
     const chars = '0123456789';
@@ -1061,25 +1071,25 @@ function safeDecodeURIComponent(value) {
 }
 
 async function ensureMappingFromR2(token, fallbackName) {
-    if (mappings[token]) return mappings[token];
+    let entry = await FileModel.findOne({ token });
+    if (entry) return entry;
     const meta = await getRemoteObjectMeta(token);
     if (!meta || !meta.exists) return null;
 
     const originalName = safeDecodeURIComponent((meta.metadata && meta.metadata.originalname) || fallbackName || token) || fallbackName || token;
     const safeOriginal = safeFileName((meta.metadata && meta.metadata.safeoriginal) || originalName || token);
 
-    const entry = {
+    entry = new FileModel({
         token,
         originalName,
         safeOriginal,
-        size: meta.contentLength || null,
+        size: meta.contentLength || 0,
         mime: meta.contentType || null,
-        createdAt: meta.lastModified || new Date().toISOString(),
+        createdAt: meta.lastModified || new Date(),
         storage: 'r2'
-    };
-
-    mappings[token] = entry;
-    saveMappingsToDisk();
+    });
+    await entry.save();
+    await StatusModel.updateOne({ key: 'global' }, { $inc: { totalSize: entry.size } }, { upsert: true });
     return entry;
 }
 
@@ -1193,18 +1203,34 @@ app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }))
 
 const multerStorage = {
     _handleFile: async function(req, file, cb) {
-        const token = genToken();
-        const originalName = file.originalname || 'file';
-        const safeOriginal = safeFileName(originalName);
-
-        req.uploadToken = token;
-        req.safeOriginal = safeOriginal;
-        req.originalName = originalName;
-
-        let size = 0;
-        file.stream.on('data', chunk => { size += chunk.length; });
-
         try {
+            const estimatedSize = parseInt(req.headers['content-length'] || 0, 10);
+            
+            let status = await StatusModel.findOne({ key: 'global' });
+            if (!status) status = await new StatusModel({ key: 'global', totalSize: 0 }).save();
+            
+            const dbStats = await mongoose.connection.db.stats().catch(() => ({ dataSize: 0 }));
+            const dbSize = dbStats.dataSize || 0;
+
+            if (status.totalSize + estimatedSize > LIMIT_R2_BYTES || dbSize > LIMIT_DB_BYTES) {
+                const wipeTime = new Date();
+                status.totalSize = 0;
+                status.lastWipe = wipeTime;
+                await status.save();
+                triggerBackgroundWipe(wipeTime);
+            }
+
+            const token = genToken();
+            const originalName = file.originalname || 'file';
+            const safeOriginal = safeFileName(originalName);
+
+            req.uploadToken = token;
+            req.safeOriginal = safeOriginal;
+            req.originalName = originalName;
+
+            let size = 0;
+            file.stream.on('data', chunk => { size += chunk.length; });
+
             const parallelUploads3 = new Upload({
                 client: s3,
                 params: {
@@ -1246,18 +1272,20 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         const token = req.uploadToken;
         const originalName = req.originalName || (req.file && req.file.originalname) || 'file';
         const safeOriginal = req.safeOriginal || safeFileName(originalName);
-        const entry = {
+        const size = req.file ? req.file.size : 0;
+        
+        const entry = new FileModel({
             token,
             originalName,
             safeOriginal,
-            size: req.file ? req.file.size : 0,
+            size: size,
             mime: req.file ? req.file.mimetype : contentTypeFromName(originalName),
-            createdAt: new Date().toISOString(),
+            createdAt: new Date(),
             storage: 'r2'
-        };
-
-        mappings[token] = entry;
-        saveMappingsToDisk();
+        });
+        
+        await entry.save();
+        await StatusModel.updateOne({ key: 'global' }, { $inc: { totalSize: size } }, { upsert: true });
 
         const origin = (process.env.BASE_URL || 'https://bref.adamdh7.org').replace(/\/+$/, '');
         const sharePath = `/TF-${token}/${encodeURIComponent(safeOriginal)}`;
@@ -1320,8 +1348,16 @@ app.get(['/TF-:token', '/TF-:token/', '/TF-:token/:name'], async (req, res) => {
     }
 });
 
-app.get('/_admin/mappings', (req, res) => {
-    return res.json({ count: Object.keys(mappings).length, tokens: Object.keys(mappings).slice(0, 50) });
+app.get('/_admin/mappings', async (req, res) => {
+    try {
+        const count = await FileModel.countDocuments();
+        const tokensDocs = await FileModel.find().select('token').limit(50);
+        const tokens = tokensDocs.map(d => d.token);
+        const status = await StatusModel.findOne({ key: 'global' });
+        return res.json({ count, tokens, totalSize: status ? status.totalSize : 0 });
+    } catch (e) {
+        return res.status(500).json({ error: 'Server Error' });
+    }
 });
 
 app.get('/sitemap.xml', (req, res) => {
@@ -1363,16 +1399,18 @@ app.use((err, req, res, next) => {
 
 setInterval(async () => {
     const now = Date.now();
-    for (const [token, entry] of Object.entries(mappings)) {
-        const created = new Date(entry.createdAt).getTime();
-        if (Number.isFinite(created) && now - created > MAX_AGE_MS) {
+    try {
+        const thresholdDate = new Date(now - MAX_AGE_MS);
+        const oldFiles = await FileModel.find({ createdAt: { $lt: thresholdDate } });
+        for (const entry of oldFiles) {
             try {
-                await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: token }));
-                delete mappings[token];
-                saveMappingsToDisk();
+                await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: entry.token }));
+                await FileModel.deleteOne({ _id: entry._id });
+                await StatusModel.updateOne({ key: 'global' }, { $inc: { totalSize: -entry.size } });
             } catch (e) {}
         }
-    }
+    } catch (e) {}
 }, 3600000);
 
 app.listen(PORT);
+
