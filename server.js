@@ -4,7 +4,6 @@ const fs = require('fs');
 const cors = require('cors');
 const compression = require('compression');
 const multer = require('multer');
-const { Readable } = require('stream');
 const { S3Client, DeleteObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 const mongoose = require('mongoose');
@@ -1097,85 +1096,6 @@ function buildRemoteUrl(remotePath) {
     return `${R2_BASE_URL}/${encodeURIComponent(String(remotePath))}`;
 }
 
-function applyDownloadHeaders(res, filename, inlinePreferred, mime, contentLength, contentRange, acceptRanges, forceDownload) {
-    let type = mime || contentTypeFromName(filename);
-    if (forceDownload) {
-        type = 'application/octet-stream';
-    }
-    res.setHeader('Content-Type', type);
-    res.setHeader('Accept-Ranges', acceptRanges || 'bytes');
-    if (contentLength) res.setHeader('Content-Length', contentLength);
-    if (contentRange) res.setHeader('Content-Range', contentRange);
-    
-    let dispositionType = inlinePreferred ? 'inline' : 'attachment';
-    if (forceDownload) {
-        dispositionType = 'attachment';
-    }
-    res.setHeader('Content-Disposition', `${dispositionType}; filename="${safeFileName(filename)}"`);
-}
-
-async function serveRemoteRawFile(req, res, remotePath, filename, options = {}) {
-    const remoteUrl = buildRemoteUrl(remotePath);
-    const headers = {};
-    if (req.headers.range) headers.Range = req.headers.range;
-
-    const fetchMethod = req.method === 'HEAD' ? 'HEAD' : 'GET';
-    let upstream;
-    const abortController = new AbortController();
-
-    req.on('close', () => {
-        abortController.abort();
-    });
-
-    try {
-        upstream = await fetch(remoteUrl, { 
-            method: fetchMethod, 
-            headers, 
-            redirect: 'follow',
-            signal: abortController.signal
-        });
-    } catch (err) {
-        if (err.name === 'AbortError') return;
-        return sendUnknown(req, res);
-    }
-    
-    if (!upstream.ok && upstream.status !== 206) return sendUnknown(req, res);
-
-    const contentType = upstream.headers.get('content-type') || contentTypeFromName(filename);
-    const contentLength = upstream.headers.get('content-length');
-    const acceptRanges = upstream.headers.get('accept-ranges') || 'bytes';
-    const contentRange = upstream.headers.get('content-range');
-    const inlinePreferred = Boolean(options.inlinePreferred);
-    const forceDownload = Boolean(options.forceDownload);
-
-    res.status(upstream.status === 206 ? 206 : 200);
-    applyDownloadHeaders(res, filename, inlinePreferred, contentType, contentLength, contentRange, acceptRanges, forceDownload);
-
-    if (req.method === 'HEAD') {
-        return res.end();
-    }
-
-    if (!upstream.body) return res.end();
-    
-    try {
-        const bodyStream = Readable.fromWeb(upstream.body);
-        bodyStream.pipe(res);
-        
-        bodyStream.on('error', (err) => {
-            if (!res.headersSent) res.status(500);
-            if (!res.writableEnded) res.end();
-        });
-
-        req.on('close', () => {
-            if (bodyStream && typeof bodyStream.destroy === 'function') {
-                bodyStream.destroy();
-            }
-        });
-    } catch (err) {
-        if (!res.writableEnded) res.end();
-    }
-}
-
 const app = express();
 
 app.disable('x-powered-by');
@@ -1318,31 +1238,32 @@ app.get(['/TF-:token', '/TF-:token/', '/TF-:token/:name'], async (req, res) => {
         const htmlPreview = wantsHtmlPreview(req);
         const origin = (process.env.BASE_URL || 'https://bref.adamdh7.org').replace(/\/+$/, '');
 
+        const directR2Url = buildRemoteUrl(token);
+
         if (!requestedName) {
             if (isVideo) {
-                const targetUrl = `/TF-${token}/${encodeURIComponent(filename)}?raw=1`;
+                const targetUrl = directR2Url;
                 const fullUrl = `${origin}/TF-${token}`;
                 return res.status(200).type('html').send(buildCustomPlayerHtml(filename, targetUrl, fullUrl, entry.mime));
             }
             if (isImage) {
-                const targetUrl = `/TF-${token}/${encodeURIComponent(filename)}?raw=1`;
+                const targetUrl = directR2Url;
                 return res.status(200).type('html').send(buildViewerHtml(filename, targetUrl, filename));
             }
-            return serveRemoteRawFile(req, res, token, filename, { inlinePreferred: false, forceDownload: true });
+            return res.redirect(302, directR2Url);
         }
 
         if (requestedName && !isValidName) {
-            return serveRemoteRawFile(req, res, token, realName, { inlinePreferred: false, forceDownload: true });
+            return res.redirect(302, directR2Url);
         }
 
         if (htmlPreview && !downloadRequested && !rawRequested && previewable) {
-            const targetUrl = `/TF-${token}/${encodeURIComponent(filename)}?raw=1`;
-            const downloadUrl = `/TF-${token}/${encodeURIComponent(filename)}?download=1`;
+            const targetUrl = directR2Url;
+            const downloadUrl = directR2Url;
             return res.status(200).type('html').send(buildLightweightViewerHtml(filename, targetUrl, downloadUrl, isVideo));
         }
 
-        const inlinePreferred = (previewable || rawRequested) && !downloadRequested;
-        return serveRemoteRawFile(req, res, token, filename, { inlinePreferred, forceDownload: !previewable || downloadRequested });
+        return res.redirect(302, directR2Url);
     } catch (err) {
         return sendUnknown(req, res);
     }
@@ -1413,4 +1334,3 @@ setInterval(async () => {
 }, 3600000);
 
 app.listen(PORT);
-
