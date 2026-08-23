@@ -4,7 +4,9 @@ const fs = require('fs');
 const cors = require('cors');
 const compression = require('compression');
 const multer = require('multer');
-const { S3Client, DeleteObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const { Readable } = require('stream');
+const { S3Client, DeleteObjectCommand, HeadObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { Upload } = require('@aws-sdk/lib-storage');
 const mongoose = require('mongoose');
 
@@ -21,6 +23,7 @@ const MAX_FILE_SIZE = 7 * 1024 * 1024 * 1024;
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const LIMIT_R2_BYTES = 7516192768;
 const LIMIT_DB_BYTES = 35651584;
+const DOWNLOAD_URL_TTL_SECONDS = 3600;
 
 const R2_BASE_URL = 'https://pub-e2d76735e9dd42f2af664d9e64599ca6.r2.dev';
 const ICON_URL = 'https://adamdh7.org/adamdh7.png';
@@ -177,23 +180,62 @@ function escapeHtml(text) {
         .replace(/'/g, '&#39;');
 }
 
-function wantsHtmlPreview(req) {
-    const accept = String(req.headers.accept || '').toLowerCase();
-    const dest = String(req.headers['sec-fetch-dest'] || '').toLowerCase();
-    const hasRange = Boolean(req.headers.range);
+function buildContentDisposition(filename) {
+    const original = String(filename || 'file');
+    const fallback = safeFileName(original).replace(/["\\]/g, '_') || 'file';
+    return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(original)}`;
+}
 
-    if (hasRange) return false;
-    if (dest === 'video' || dest === 'audio' || dest === 'image') return false;
-    if (dest === 'document' || dest === 'iframe' || dest === 'object' || dest === 'embed') return true;
-    if (accept.includes('text/html')) return true;
-    if (!dest && !accept.includes('video/') && !accept.includes('audio/') && !accept.includes('image/')) return true;
-    return false;
+async function buildPresignedDownloadUrl(token, filename, mimeType) {
+    const command = new GetObjectCommand({
+        Bucket: R2_BUCKET,
+        Key: token,
+        ResponseContentDisposition: buildContentDisposition(filename),
+        ResponseContentType: mimeType || contentTypeFromName(filename),
+        ResponseCacheControl: 'no-store'
+    });
+
+    return await getSignedUrl(s3, command, {
+        expiresIn: DOWNLOAD_URL_TTL_SECONDS
+    });
+}
+
+function buildForceDownloadHtml(filename, downloadUrl) {
+    const safeTitle = escapeHtml(filename);
+    const safeUrl = escapeHtml(downloadUrl);
+    return `<!doctype html>
+<html lang="ht">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${safeTitle}</title>
+<link rel="icon" type="image/png" href="${ICON_URL}">
+<style>
+html, body { margin: 0; padding: 0; width: 100vw; height: 100vh; background: #000; color: #fff; display: flex; align-items: center; justify-content: center; font-family: sans-serif; text-align: center; }
+a { color: #fff; text-decoration: underline; font-size: 18px; margin-top: 15px; display: inline-block; }
+</style>
+</head>
+<body>
+<div>
+  <p>Telechaje n ap kòmanse...</p>
+  <a id="dl" href="${safeUrl}" download="${safeTitle}">Si telechaje a pa kòmanse klike isit la</a>
+</div>
+<script>
+window.onload = function() {
+  var a = document.getElementById('dl');
+  if (a) {
+    a.click();
+  }
+};
+</script>
+</body>
+</html>`;
 }
 
 function buildLightweightViewerHtml(title, mediaUrl, downloadUrl, isVideo) {
     const safeTitle = escapeHtml(title);
     const mediaBlock = isVideo 
-        ? `<video id="media-element" src="${mediaUrl}" autoplay controls playsinline crossorigin="anonymous"></video>` 
+        ? `<video id="media-element" src="${mediaUrl}" autoplay controls playsinline></video>` 
         : `<img id="media-element" src="${mediaUrl}" alt="${safeTitle}">`;
     
     return `<!doctype html>
@@ -211,7 +253,7 @@ html, body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; backgroun
 .wrap { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; position: relative; }
 img, video, audio { max-width: 100%; max-height: 100%; object-fit: contain; outline: none; }
 .download-btn {
-  position: absolute; bottom: 30px; z-index: 9999; display: none; background: rgba(255,255,255,0.2); width: 56px; height: 56px; border-radius: 50%; align-items: center; justify-content: center; color: #fff; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.3); transition: opacity 0.3s ease, transform 0.2s ease; cursor: pointer; text-decoration: none;
+  position: absolute; bottom: 30px; z-index: 9999; display: flex; background: rgba(255,255,255,0.2); width: 56px; height: 56px; border-radius: 50%; align-items: center; justify-content: center; color: #fff; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.3); transition: opacity 0.3s ease, transform 0.2s ease; cursor: pointer; text-decoration: none;
 }
 .download-btn:active { transform: scale(0.9); }
 .download-btn svg { width: 24px; height: 24px; fill: currentColor; }
@@ -225,18 +267,17 @@ img, video, audio { max-width: 100%; max-height: 100%; object-fit: contain; outl
   </a>
 </div>
 <script>
-function forceDownload() { window.location.href = "${downloadUrl}"; }
+function forceDownload() {
+  window.location.href = "${downloadUrl}";
+}
 var mediaEl = document.getElementById('media-element');
 var btn = document.getElementById('download-btn');
+
 if (mediaEl) {
   mediaEl.addEventListener('error', forceDownload);
-  if (mediaEl.tagName === 'IMG') { btn.style.display = 'flex'; }
-  else {
-    mediaEl.addEventListener('playing', function() { btn.style.display = 'flex'; });
-    mediaEl.addEventListener('loadedmetadata', function() { if (mediaEl.duration && mediaEl.currentTime > 0) { btn.style.display = 'flex'; } });
-    mediaEl.addEventListener('canplay', function() { btn.style.display = 'flex'; });
-  }
-} else { btn.style.display = 'flex'; }
+} else {
+  btn.style.display = 'flex';
+}
 </script>
 </body>
 </html>`;
@@ -484,7 +525,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
 <body>
   <div class="wrap" id="mainWrap">
     <div class="video-card" id="card">
-      <video id="video" preload="auto" playsinline crossorigin="anonymous">
+      <video id="video" preload="auto" playsinline>
         <source src="${safeTargetUrl}" type="${safeMime}">
       </video>
       <div id="errorOverlay">
@@ -572,6 +613,9 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   let hideTimeout = null;
   let isCssFullscreen = false;
   let isEndedState = false;
+
+  let currentBrightness = 1;
+  let currentVolume = 1;
 
   function isIOSDevice() {
     return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -737,6 +781,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   video.addEventListener('loadedmetadata', ()=> {
     durationEl.textContent = formatTime(video.duration || 0);
     seekBar.setAttribute('aria-valuemax', Math.floor(video.duration || 0));
+    currentVolume = typeof video.volume === 'number' ? video.volume : 1;
   });
   video.addEventListener('play', () => { clearEndedState(); updatePlayIcon(); });
   video.addEventListener('pause', updatePlayIcon);
@@ -755,6 +800,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     insideMini.classList.add('inside-visible');
     resetHideTimer();
   }
+
   function hideAll(){
     controlsWrap.classList.remove('controls-visible');
     controlsWrap.classList.add('controls-hidden');
@@ -762,6 +808,7 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     insideMini.classList.add('inside-hidden');
     if(hideTimeout) clearTimeout(hideTimeout);
   }
+
   function toggleAll(){
     const isVisible = controlsWrap.classList.contains('controls-visible') && insideMini.classList.contains('inside-visible');
     if(isVisible) {
@@ -915,13 +962,11 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     const relX = clientX - rect.left;
     const limit = rect.width * cornerRatio;
     if(relX <= limit){
-      const styleFilter = getComputedStyle(video).filter || '';
-      const match = styleFilter.match(/brightness\(([^)]+)\)/);
-      const initial = match ? parseFloat(match[1]) : 1;
-      gesture = { type:'brightness', startY:clientY, initialValue: isNaN(initial) ? 1 : initial };
+      gesture = { type:'brightness', startY:clientY, initialValue: currentBrightness };
       showSwipeIndicator('brightness', Math.round(gesture.initialValue * 100));
     } else if(relX >= (rect.width - limit)){
-      gesture = { type:'volume', startY:clientY, initialValue: video.volume };
+      currentVolume = typeof video.volume === 'number' ? video.volume : 1;
+      gesture = { type:'volume', startY:clientY, initialValue: currentVolume };
       showSwipeIndicator('volume', Math.round(gesture.initialValue * 100));
     } else { gesture = null; }
   }
@@ -934,12 +979,13 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
     let newVal = gesture.initialValue + pct;
     newVal = clamp(newVal, 0, 1);
     if(gesture.type === 'brightness'){
-      const applied = Math.max(0.05, newVal);
-      video.style.filter = 'brightness(' + applied + ')';
-      showSwipeIndicator('brightness', Math.round(applied * 100));
+      currentBrightness = Math.max(0.05, newVal);
+      video.style.filter = 'brightness(' + currentBrightness + ')';
+      showSwipeIndicator('brightness', Math.round(currentBrightness * 100));
     } else {
-      video.volume = newVal;
-      showSwipeIndicator('volume', Math.round(newVal * 100));
+      currentVolume = newVal;
+      video.volume = currentVolume;
+      showSwipeIndicator('volume', Math.round(currentVolume * 100));
     }
   }
 
@@ -1010,9 +1056,10 @@ function buildCustomPlayerHtml(title, targetUrl, fullUrl, mimeType) {
   }
 
   const sourceUrl = video.querySelector('source')?.src || '';
-  video.addEventListener('error', async (e)=>{
+
+  video.addEventListener('error', async ()=>{
     try {
-      const r = await fetch(sourceUrl, { method: 'HEAD', mode: 'cors' });
+      const r = await fetch(sourceUrl, { method: 'HEAD' });
       if(!r.ok) showError('Sève an repon ' + r.status + '.');
       else showError('Fòma videyo sa a pa sipòte.');
     } catch(fetchErr){
@@ -1076,6 +1123,7 @@ function safeDecodeURIComponent(value) {
 async function ensureMappingFromR2(token, fallbackName) {
     let entry = await FileModel.findOne({ token });
     if (entry) return entry;
+
     const meta = await getRemoteObjectMeta(token);
     if (!meta || !meta.exists) return null;
 
@@ -1091,8 +1139,15 @@ async function ensureMappingFromR2(token, fallbackName) {
         createdAt: meta.lastModified || new Date(),
         storage: 'r2'
     });
+
     await entry.save();
-    await StatusModel.updateOne({ key: 'global' }, { $inc: { totalSize: entry.size } }, { upsert: true });
+
+    await StatusModel.updateOne(
+        { key: 'global' },
+        { $inc: { totalSize: entry.size } },
+        { upsert: true }
+    );
+
     return entry;
 }
 
@@ -1103,8 +1158,10 @@ function buildRemoteUrl(remotePath) {
 const app = express();
 
 app.disable('x-powered-by');
+
 app.use(cors());
-app.options('*', cors()); 
+
+app.options('*', cors());
 
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
@@ -1123,7 +1180,13 @@ app.use(compression({
 }));
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }));
+
+app.use(
+    express.static(
+        path.join(__dirname, 'public'),
+        { index: 'index.html' }
+    )
+);
 
 const multerStorage = {
     _handleFile: async function(req, file, cb) {
@@ -1131,20 +1194,36 @@ const multerStorage = {
             const estimatedSize = parseInt(req.headers['content-length'] || 0, 10);
             
             let status = await StatusModel.findOne({ key: 'global' });
-            if (!status) status = await new StatusModel({ key: 'global', totalSize: 0 }).save();
+
+            if (!status) {
+                status = await new StatusModel({
+                    key: 'global',
+                    totalSize: 0
+                }).save();
+            }
             
-            const dbStats = await mongoose.connection.db.stats().catch(() => ({ dataSize: 0 }));
+            const dbStats = await mongoose.connection.db.stats().catch(() => ({
+                dataSize: 0
+            }));
+
             const dbSize = dbStats.dataSize || 0;
 
-            if (status.totalSize + estimatedSize > LIMIT_R2_BYTES || dbSize > LIMIT_DB_BYTES) {
+            if (
+                status.totalSize + estimatedSize > LIMIT_R2_BYTES ||
+                dbSize > LIMIT_DB_BYTES
+            ) {
                 const wipeTime = new Date();
+
                 status.totalSize = 0;
                 status.lastWipe = wipeTime;
+
                 await status.save();
+
                 triggerBackgroundWipe(wipeTime);
             }
 
             const token = genToken();
+
             const originalName = file.originalname || 'file';
             const safeOriginal = safeFileName(originalName);
 
@@ -1153,7 +1232,10 @@ const multerStorage = {
             req.originalName = originalName;
 
             let size = 0;
-            file.stream.on('data', chunk => { size += chunk.length; });
+
+            file.stream.on('data', chunk => {
+                size += chunk.length;
+            });
 
             const parallelUploads3 = new Upload({
                 client: s3,
@@ -1182,92 +1264,252 @@ const multerStorage = {
             cb(err);
         }
     },
+
     _removeFile: function(req, file, cb) {
         cb(null);
     }
 };
 
-const upload = multer({ storage: multerStorage, limits: { fileSize: MAX_FILE_SIZE } });
+const upload = multer({
+    storage: multerStorage,
+    limits: {
+        fileSize: MAX_FILE_SIZE
+    }
+});
 
 app.post('/upload', upload.single('file'), async (req, res) => {
     try {
-        if (!req.file && !req.uploadToken) return res.status(400).json({ error: 'Fichye pa la' });
+        if (!req.file && !req.uploadToken) {
+            return res.status(400).json({
+                error: 'Fichye pa la'
+            });
+        }
 
         const token = req.uploadToken;
-        const originalName = req.originalName || (req.file && req.file.originalname) || 'file';
-        const safeOriginal = req.safeOriginal || safeFileName(originalName);
+
+        const originalName =
+            req.originalName ||
+            (req.file && req.file.originalname) ||
+            'file';
+
+        const safeOriginal =
+            req.safeOriginal ||
+            safeFileName(originalName);
+
         const size = req.file ? req.file.size : 0;
-        
+
         const entry = new FileModel({
             token,
             originalName,
             safeOriginal,
             size: size,
-            mime: req.file ? req.file.mimetype : contentTypeFromName(originalName),
+            mime: req.file
+                ? req.file.mimetype
+                : contentTypeFromName(originalName),
             createdAt: new Date(),
             storage: 'r2'
         });
-        
-        await entry.save();
-        await StatusModel.updateOne({ key: 'global' }, { $inc: { totalSize: size } }, { upsert: true });
 
-        const origin = (process.env.BASE_URL || 'https://bref.adamdh7.org').replace(/\/+$/, '');
-        const sharePath = `/TF-${token}/${encodeURIComponent(safeOriginal)}`;
-        return res.json({ token, url: `${origin}${sharePath}`, sharePath, info: entry });
+        await entry.save();
+
+        await StatusModel.updateOne(
+            { key: 'global' },
+            { $inc: { totalSize: size } },
+            { upsert: true }
+        );
+
+        const origin = (
+            process.env.BASE_URL ||
+            'https://bref.adamdh7.org'
+        ).replace(/\/+$/, '');
+
+        const sharePath =
+            `/TF-${token}/${encodeURIComponent(safeOriginal)}`;
+
+        return res.json({
+            token,
+            url: `${origin}${sharePath}`,
+            sharePath,
+            info: entry
+        });
     } catch (err) {
-        return res.status(500).json({ error: 'Erè souple eseye ankò' });
+        return res.status(500).json({
+            error: 'Erè souple eseye ankò'
+        });
+    }
+});
+
+app.get(['/TF-:token/download', '/TF-:token/download/:name'], async (req, res) => {
+    try {
+        let token = req.params.token;
+
+        if (token) {
+            token = token.replace(/\/$/, '');
+        }
+
+        const requestedName = req.params.name
+            ? safeDecodeURIComponent(req.params.name)
+            : null;
+
+        const entry = await ensureMappingFromR2(
+            token,
+            requestedName
+        );
+
+        if (!entry) {
+            return sendUnknown(req, res);
+        }
+
+        const realName =
+            entry.safeOriginal ||
+            entry.originalName ||
+            'file';
+
+        const filename =
+            requestedName ||
+            realName;
+
+        const isValidName =
+            !requestedName ||
+            requestedName === entry.safeOriginal ||
+            requestedName === entry.originalName;
+
+        if (!isValidName) {
+            return res.status(404).send('Fichye pa ekziste');
+        }
+
+        const downloadUrl = await buildPresignedDownloadUrl(
+            token,
+            filename,
+            entry.mime || contentTypeFromName(filename)
+        );
+
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+
+        return res.redirect(302, downloadUrl);
+    } catch (err) {
+        return sendUnknown(req, res);
     }
 });
 
 app.get(['/TF-:token', '/TF-:token/', '/TF-:token/:name'], async (req, res) => {
     try {
         let token = req.params.token;
+
         if (token) {
             token = token.replace(/\/$/, '');
         }
+
         const requestedName = req.params.name || null;
-        const entry = await ensureMappingFromR2(token, requestedName);
 
-        if (!entry) return sendUnknown(req, res);
+        const entry = await ensureMappingFromR2(
+            token,
+            requestedName
+        );
 
-        const realName = entry.safeOriginal || entry.originalName || 'file';
-        const filename = requestedName || realName;
+        if (!entry) {
+            return sendUnknown(req, res);
+        }
+
+        const realName =
+            entry.safeOriginal ||
+            entry.originalName ||
+            'file';
+
+        const filename =
+            requestedName ||
+            realName;
+
         const isVideo = isVideoFile(filename);
         const isImage = isImageFile(filename);
-        const previewable = isImage || isVideo;
-        const isValidName = requestedName && (requestedName === entry.safeOriginal || requestedName === entry.originalName);
 
-        const rawRequested = req.query.raw === '1';
-        const downloadRequested = req.query.download === '1';
-        const htmlPreview = wantsHtmlPreview(req);
-        const origin = (process.env.BASE_URL || 'https://bref.adamdh7.org').replace(/\/+$/, '');
+        const isValidName =
+            requestedName &&
+            (
+                requestedName === entry.safeOriginal ||
+                requestedName === entry.originalName
+            );
 
-        const directR2Url = buildRemoteUrl(token);
+        const origin = (
+            process.env.BASE_URL ||
+            'https://bref.adamdh7.org'
+        ).replace(/\/+$/, '');
+
+        const directR2Url =
+            buildRemoteUrl(token);
+
+        const downloadPath =
+            `/TF-${token}/download/${encodeURIComponent(realName)}`;
+
+        const downloadUrl =
+            `${origin}${downloadPath}`;
 
         if (!requestedName) {
             if (isVideo) {
-                const targetUrl = directR2Url;
-                const fullUrl = `${origin}/TF-${token}`;
-                return res.status(200).type('html').send(buildCustomPlayerHtml(filename, targetUrl, fullUrl, entry.mime));
+                const fullUrl =
+                    `${origin}/TF-${token}`;
+
+                return res
+                    .status(200)
+                    .type('html')
+                    .send(
+                        buildCustomPlayerHtml(
+                            realName,
+                            directR2Url,
+                            fullUrl,
+                            entry.mime
+                        )
+                    );
+            } else {
+                return res
+                    .status(200)
+                    .type('html')
+                    .send(
+                        buildForceDownloadHtml(
+                            realName,
+                            downloadUrl
+                        )
+                    );
             }
-            if (isImage) {
-                const targetUrl = directR2Url;
-                return res.status(200).type('html').send(buildViewerHtml(filename, targetUrl, filename));
-            }
-            return res.redirect(302, directR2Url);
         }
 
-        if (requestedName && !isValidName) {
-            return res.redirect(302, directR2Url);
+        if (!isValidName) {
+            return res
+                .status(200)
+                .type('html')
+                .send(
+                    buildForceDownloadHtml(
+                        realName,
+                        downloadUrl
+                    )
+                );
         }
 
-        if (htmlPreview && !downloadRequested && !rawRequested && previewable) {
-            const targetUrl = directR2Url;
-            const downloadUrl = directR2Url;
-            return res.status(200).type('html').send(buildLightweightViewerHtml(filename, targetUrl, downloadUrl, isVideo));
+        if (isVideo || isImage) {
+            return res
+                .status(200)
+                .type('html')
+                .send(
+                    buildLightweightViewerHtml(
+                        realName,
+                        directR2Url,
+                        downloadUrl,
+                        isVideo
+                    )
+                );
+        } else {
+            return res
+                .status(200)
+                .type('html')
+                .send(
+                    buildForceDownloadHtml(
+                        realName,
+                        downloadUrl
+                    )
+                );
         }
-
-        return res.redirect(302, directR2Url);
     } catch (err) {
         return sendUnknown(req, res);
     }
@@ -1275,63 +1517,180 @@ app.get(['/TF-:token', '/TF-:token/', '/TF-:token/:name'], async (req, res) => {
 
 app.get('/_admin/mappings', async (req, res) => {
     try {
-        const count = await FileModel.countDocuments();
-        const tokensDocs = await FileModel.find().select('token').limit(50);
-        const tokens = tokensDocs.map(d => d.token);
-        const status = await StatusModel.findOne({ key: 'global' });
-        return res.json({ count, tokens, totalSize: status ? status.totalSize : 0 });
+        const count =
+            await FileModel.countDocuments();
+
+        const tokensDocs =
+            await FileModel
+                .find()
+                .select('token')
+                .limit(50);
+
+        const tokens =
+            tokensDocs.map(d => d.token);
+
+        const status =
+            await StatusModel.findOne({
+                key: 'global'
+            });
+
+        return res.json({
+            count,
+            tokens,
+            totalSize:
+                status
+                    ? status.totalSize
+                    : 0
+        });
     } catch (e) {
-        return res.status(500).json({ error: 'Server Error' });
+        return res.status(500).json({
+            error: 'Server Error'
+        });
     }
 });
 
 app.get('/sitemap.xml', (req, res) => {
-    res.sendFile(path.join(__dirname, 'sitemap.xml'));
+    res.sendFile(
+        path.join(__dirname, 'sitemap.xml')
+    );
 });
 
 app.get('/poste.json', (req, res) => {
     try {
-        const filePath = path.join(__dirname, 'poste.json');
-        if (!fs.existsSync(filePath)) return res.json([]);
-        const fileContent = fs.readFileSync(filePath, 'utf8');
-        const jsonData = JSON.parse(fileContent);
-        if (!Array.isArray(jsonData)) return res.json(jsonData);
-        const shuffled = [...jsonData].sort(() => 0.5 - Math.random());
-        const randomCount = Math.floor(Math.random() * 2) + 3;
-        res.json(shuffled.slice(0, randomCount));
+        const filePath =
+            path.join(__dirname, 'poste.json');
+
+        if (!fs.existsSync(filePath)) {
+            return res.json([]);
+        }
+
+        const fileContent =
+            fs.readFileSync(
+                filePath,
+                'utf8'
+            );
+
+        const jsonData =
+            JSON.parse(fileContent);
+
+        if (!Array.isArray(jsonData)) {
+            return res.json(jsonData);
+        }
+
+        const shuffled =
+            [...jsonData].sort(
+                () => 0.5 - Math.random()
+            );
+
+        const randomCount =
+            Math.floor(Math.random() * 2) + 3;
+
+        res.json(
+            shuffled.slice(
+                0,
+                randomCount
+            )
+        );
     } catch (err) {
-        res.status(500).json({ error: 'Server Error' });
+        res.status(500).json({
+            error: 'Server Error'
+        });
     }
 });
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/health', (req, res) => {
+    res.json({
+        ok: true
+    });
+});
 
 app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/TF-') || req.path.startsWith('/upload') || req.path.startsWith('/_admin') || req.path.startsWith('/health')) return next();
-    const indexPath = path.join(__dirname, 'public', 'index.html');
+    if (
+        req.path.startsWith('/TF-') ||
+        req.path.startsWith('/upload') ||
+        req.path.startsWith('/_admin') ||
+        req.path.startsWith('/health')
+    ) {
+        return next();
+    }
+
+    const indexPath =
+        path.join(
+            __dirname,
+            'public',
+            'index.html'
+        );
+
     if (fs.existsSync(indexPath)) {
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader(
+            'Content-Type',
+            'text/html; charset=utf-8'
+        );
+
         return res.sendFile(indexPath);
     }
-    return res.status(404).send('Paj sa pa ekziste');
+
+    return res.status(404).send(
+        'Paj sa pa ekziste'
+    );
 });
 
 app.use((err, req, res, next) => {
-    if (err && err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Fichye a twò gwo. Max: 7Go' });
-    if (err) return res.status(500).json({ error: 'Erè nan sève a' });
+    if (
+        err &&
+        err.code === 'LIMIT_FILE_SIZE'
+    ) {
+        return res.status(413).json({
+            error: 'Fichye a twò gwo. Max: 7Go'
+        });
+    }
+
+    if (err) {
+        return res.status(500).json({
+            error: 'Erè nan sève a'
+        });
+    }
+
     next();
 });
 
 setInterval(async () => {
     const now = Date.now();
+
     try {
-        const thresholdDate = new Date(now - MAX_AGE_MS);
-        const oldFiles = await FileModel.find({ createdAt: { $lt: thresholdDate } });
+        const thresholdDate =
+            new Date(
+                now - MAX_AGE_MS
+            );
+
+        const oldFiles =
+            await FileModel.find({
+                createdAt: {
+                    $lt: thresholdDate
+                }
+            });
+
         for (const entry of oldFiles) {
             try {
-                await s3.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: entry.token }));
-                await FileModel.deleteOne({ _id: entry._id });
-                await StatusModel.updateOne({ key: 'global' }, { $inc: { totalSize: -entry.size } });
+                await s3.send(
+                    new DeleteObjectCommand({
+                        Bucket: R2_BUCKET,
+                        Key: entry.token
+                    })
+                );
+
+                await FileModel.deleteOne({
+                    _id: entry._id
+                });
+
+                await StatusModel.updateOne(
+                    { key: 'global' },
+                    {
+                        $inc: {
+                            totalSize: -entry.size
+                        }
+                    }
+                );
             } catch (e) {}
         }
     } catch (e) {}
