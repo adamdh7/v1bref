@@ -244,7 +244,7 @@ function buildLightweightViewerHtml(title, mediaUrl, downloadUrl, isVideo, mimeT
     const safeDownloadUrl = escapeHtml(downloadUrl);
     const safeMime = escapeHtml(mimeType || contentTypeFromName(title));
     const mediaBlock = isVideo
-        ? `<video id="media-element" data-src="${safeMediaUrl}" preload="auto" playsinline controls></video>`
+        ? `<video id="media-element" data-src="${safeMediaUrl}" preload="metadata" playsinline controls></video>`
         : `<img id="media-element" data-src="${safeMediaUrl}" alt="${safeTitle}" decoding="async">`;
 
     return `<!doctype html>
@@ -414,7 +414,7 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-inde
 <body>
 <div class="wrap" id="mainWrap">
     <div class="video-card" id="card">
-        <video id="video" preload="auto" playsinline data-src="${safeTargetUrl}">
+        <video id="video" preload="metadata" playsinline data-src="${safeTargetUrl}">
             <source data-src="${safeTargetUrl}" type="${safeMime}">
         </video>
         <div id="errorOverlay">
