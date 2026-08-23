@@ -101,7 +101,6 @@ function genToken() {
 function safeFileName(name) {
     const ext = path.extname(name || '');
     const base = path.basename(name || '', ext);
-
     const safeBase = base
         .replace(/[^a-zA-Z0-9._-]/g, '_')
         .slice(0, 120);
@@ -255,17 +254,6 @@ function buildContentDisposition(filename) {
     return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(original)}`;
 }
 
-function buildInlineContentDisposition(filename) {
-    const original = String(filename || 'file');
-
-    const fallback =
-        safeFileName(original)
-            .replace(/["\\]/g, '_') ||
-        'file';
-
-    return `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(original)}`;
-}
-
 async function buildPresignedDownloadUrl(
     token,
     filename,
@@ -300,7 +288,7 @@ async function buildPresignedMediaUrl(
         Bucket: R2_BUCKET,
         Key: token,
         ResponseContentDisposition:
-            buildInlineContentDisposition(filename),
+            `inline; filename="${safeFileName(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
         ResponseContentType:
             mimeType ||
             contentTypeFromName(filename),
@@ -312,35 +300,73 @@ async function buildPresignedMediaUrl(
         s3,
         command,
         {
-            expiresIn:
-                DOWNLOAD_URL_TTL_SECONDS
+            expiresIn: DOWNLOAD_URL_TTL_SECONDS
         }
     );
+}
+
+function isEmbeddedMediaRequest(req) {
+    const fetchDest =
+        String(
+            req.get('sec-fetch-dest') ||
+            ''
+        ).toLowerCase();
+
+    if (
+        fetchDest === 'video' ||
+        fetchDest === 'audio' ||
+        fetchDest === 'image' ||
+        fetchDest === 'object'
+    ) {
+        return true;
+    }
+
+    if (
+        req.get('range') &&
+        fetchDest !== 'document'
+    ) {
+        return true;
+    }
+
+    return false;
 }
 
 function buildUiRestrictionScript() {
     return `<script>
 (function(){
-    function block(event){
+    function preventBrowserActions(event){
         event.preventDefault();
     }
 
-    document.addEventListener('contextmenu', block, {passive:false});
-    document.addEventListener('selectstart', block, {passive:false});
-    document.addEventListener('dragstart', block, {passive:false});
-    document.addEventListener('copy', block, {passive:false});
-    document.addEventListener('cut', block, {passive:false});
-    document.addEventListener('paste', block, {passive:false});
+    document.addEventListener('contextmenu', preventBrowserActions, {passive:false});
+    document.addEventListener('selectstart', preventBrowserActions, {passive:false});
+    document.addEventListener('dragstart', preventBrowserActions, {passive:false});
+    document.addEventListener('copy', preventBrowserActions, {passive:false});
+    document.addEventListener('cut', preventBrowserActions, {passive:false});
+    document.addEventListener('paste', preventBrowserActions, {passive:false});
+
+    document.addEventListener('dblclick', preventBrowserActions, {passive:false});
+
+    document.addEventListener('keydown', function(event){
+        const key = String(event.key || '').toLowerCase();
+
+        if (
+            event.ctrlKey ||
+            event.metaKey ||
+            key === 'f12' ||
+            key === 'f5' ||
+            key === 'f11'
+        ) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    }, {passive:false});
 
     document.addEventListener('wheel', function(event){
         if (event.ctrlKey || event.metaKey) {
             event.preventDefault();
         }
     }, {passive:false});
-
-    document.addEventListener('gesturestart', block, {passive:false});
-    document.addEventListener('gesturechange', block, {passive:false});
-    document.addEventListener('gestureend', block, {passive:false});
 
     document.addEventListener('touchstart', function(event){
         if (event.touches && event.touches.length > 1) {
@@ -353,6 +379,10 @@ function buildUiRestrictionScript() {
             event.preventDefault();
         }
     }, {passive:false});
+
+    document.addEventListener('gesturestart', preventBrowserActions, {passive:false});
+    document.addEventListener('gesturechange', preventBrowserActions, {passive:false});
+    document.addEventListener('gestureend', preventBrowserActions, {passive:false});
 })();
 </script>`;
 }
@@ -584,6 +614,7 @@ ${buildUiRestrictionScript()}
         }
 
         activated = true;
+
         window.location.replace(downloadUrl);
     }
 
@@ -603,10 +634,7 @@ ${buildUiRestrictionScript()}
             let canPlay = '';
 
             try {
-                canPlay =
-                    mediaEl.canPlayType(
-                        mimeType
-                    );
+                canPlay = mediaEl.canPlayType(mimeType);
             } catch(e) {
                 canPlay = '';
             }
@@ -633,6 +661,7 @@ ${buildUiRestrictionScript()}
 
                 if (
                     !mediaError ||
+                    mediaError.code === 2 ||
                     mediaError.code === 3 ||
                     mediaError.code === 4
                 ) {
@@ -643,13 +672,9 @@ ${buildUiRestrictionScript()}
             mediaEl.src = mediaUrl;
             mediaEl.load();
 
-            const playPromise =
-                mediaEl.play();
+            const playPromise = mediaEl.play();
 
-            if (
-                playPromise &&
-                typeof playPromise.catch === 'function'
-            ) {
+            if (playPromise && typeof playPromise.catch === 'function') {
                 playPromise.catch(function(){
                     showDownloadButton();
                 });
@@ -670,19 +695,13 @@ ${buildUiRestrictionScript()}
     }
 
     window.addEventListener('load', function(){
-        setTimeout(
-            activateMedia,
-            0
-        );
+        setTimeout(activateMedia, 0);
     }, {once:true});
 
     if (btn) {
-        btn.addEventListener(
-            'click',
-            function(event){
-                event.stopPropagation();
-            }
-        );
+        btn.addEventListener('click', function(event){
+            event.stopPropagation();
+        });
     }
 })();
 </script>
@@ -759,7 +778,8 @@ function buildCustomPlayerHtml(
     title,
     targetUrl,
     fullUrl,
-    mimeType
+    mimeType,
+    downloadUrl
 ) {
     const pageTitle =
         escapeHtml(title);
@@ -776,11 +796,14 @@ function buildCustomPlayerHtml(
             'video/mp4'
         );
 
+    const safeDownloadUrl =
+        escapeHtml(downloadUrl);
+
     return `<!doctype html>
 <html lang="ht">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
 <title>${pageTitle}</title>
 <meta property="og:type" content="video.other" />
 <meta property="og:title" content="${pageTitle}" />
@@ -808,7 +831,6 @@ function buildCustomPlayerHtml(
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="${pageTitle}" />
 <link rel="apple-touch-icon" href="${ICON_URL}" />
-<link rel="preload" href="${safeTargetUrl}" as="video" />
 <style>
   :root{
     --bg:#000;
@@ -817,17 +839,26 @@ function buildCustomPlayerHtml(
     --seek-height:8px;
   }
 
-  *{box-sizing:border-box}
+  *{
+    box-sizing:border-box;
+    user-select:none;
+    -webkit-user-select:none;
+    -ms-user-select:none;
+    -moz-user-select:none;
+    -webkit-touch-callout:none;
+  }
 
   html,body{
     width:100%;
     height:100%;
+    height:100dvh;
     margin:0;
     padding:0;
     background:var(--bg);
     color:var(--accent);
     font-family:Inter,system-ui,Arial,sans-serif;
     overflow:hidden;
+    overscroll-behavior:none;
     touch-action:none;
     user-select:none;
     -webkit-user-select:none;
@@ -842,6 +873,7 @@ function buildCustomPlayerHtml(
     -webkit-user-select:none;
     -ms-user-select:none;
     -moz-user-select:none;
+    -webkit-touch-callout:none;
   }
 
   .wrap{
@@ -849,8 +881,10 @@ function buildCustomPlayerHtml(
     inset:0;
     width:100%;
     height:100%;
+    height:100dvh;
     margin:0;
     padding:0;
+    overflow:hidden;
   }
 
   .wrap.css-fullscreen{
@@ -858,8 +892,10 @@ function buildCustomPlayerHtml(
     inset:0 !important;
     width:100vw !important;
     height:100vh !important;
+    height:100dvh !important;
     z-index:99999 !important;
     background:#000;
+    overflow:hidden !important;
   }
 
   .video-card{
@@ -882,6 +918,10 @@ function buildCustomPlayerHtml(
     z-index:1;
     background:#000;
     transition:filter .08s linear;
+    user-select:none;
+    -webkit-user-select:none;
+    -webkit-touch-callout:none;
+    touch-action:none;
   }
 
   .controls-wrap{
@@ -926,7 +966,6 @@ function buildCustomPlayerHtml(
     border-radius:999px;
     cursor:pointer;
     background:rgba(255,255,255,0.22);
-    touch-action:none;
   }
 
   .fill{
@@ -1027,6 +1066,10 @@ function buildCustomPlayerHtml(
     appearance:none;
     padding:0;
     touch-action:manipulation;
+  }
+
+  .inside-item .mini-btn:disabled{
+    pointer-events:none;
   }
 
   .inside-item .mini-btn:active{
@@ -1177,6 +1220,10 @@ function buildCustomPlayerHtml(
     width:100%;
     height:100%;
     object-fit:contain;
+    user-select:none;
+    -webkit-user-select:none;
+    -webkit-touch-callout:none;
+    pointer-events:none;
   }
 
   #errTxt{
@@ -1195,8 +1242,8 @@ function buildCustomPlayerHtml(
 <body>
 <div class="wrap" id="mainWrap">
     <div class="video-card" id="card">
-        <video id="video" preload="auto" playsinline>
-            <source src="${safeTargetUrl}" type="${safeMime}">
+        <video id="video" preload="none" playsinline data-src="${safeTargetUrl}">
+            <source data-src="${safeTargetUrl}" type="${safeMime}">
         </video>
 
         <div id="errorOverlay">
@@ -1233,7 +1280,16 @@ function buildCustomPlayerHtml(
                 <div class="time" id="current">0:00</div>
 
                 <div class="progress">
-                    <div class="seek" id="seekBar" tabindex="0" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div
+                        class="seek"
+                        id="seekBar"
+                        tabindex="0"
+                        role="slider"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow="0"
+                        aria-disabled="false"
+                    >
                         <div class="fill" id="fill"></div>
                         <div class="thumb" id="thumb" aria-hidden="true"></div>
                     </div>
@@ -1245,12 +1301,20 @@ function buildCustomPlayerHtml(
             </div>
         </div>
 
-        <div class="swipe-indicator-left" id="swipeIndicatorLeft" aria-hidden="true">
+        <div
+            class="swipe-indicator-left"
+            id="swipeIndicatorLeft"
+            aria-hidden="true"
+        >
             <div class="swipe-icon" id="swipeIconLeft"></div>
             <div class="swipe-value" id="swipeValueLeft">0%</div>
         </div>
 
-        <div class="swipe-indicator-right" id="swipeIndicatorRight" aria-hidden="true">
+        <div
+            class="swipe-indicator-right"
+            id="swipeIndicatorRight"
+            aria-hidden="true"
+        >
             <div class="swipe-icon" id="swipeIconRight"></div>
             <div class="swipe-value" id="swipeValueRight">0%</div>
         </div>
@@ -1259,8 +1323,10 @@ function buildCustomPlayerHtml(
 
 <script>
 (function(){
+    const mainWrap = document.getElementById('mainWrap');
     const card = document.getElementById('card');
     const video = document.getElementById('video');
+    const source = video.querySelector('source');
     const insidePlay = document.getElementById('insidePlay');
     const insideForward = document.getElementById('insideForward');
     const insideBack = document.getElementById('insideBack');
@@ -1285,6 +1351,10 @@ function buildCustomPlayerHtml(
     const errorOverlay = document.getElementById('errorOverlay');
     const errTxt = document.getElementById('errTxt');
 
+    const mediaUrl = video.getAttribute('data-src') || '';
+    const mimeType = "${safeMime}";
+    const downloadUrl = "${safeDownloadUrl}";
+
     const svgBrightness = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="26" height="26"><path d="M12 4V2M12 22v-2M4.93 4.93L3.51 3.51M20.49 20.49l-1.42-1.42M4 12H2M22 12h-2M4.93 19.07l-1.42 1.42M20.49 3.51l-1.42 1.42M12 8a4 4 0 100 8 4 4 0 000-8z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
     const svgVolume = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="26" height="26"><path d="M11 5L6 9H2v6h4l5 4V5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 9a5 5 0 010 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1298,9 +1368,13 @@ function buildCustomPlayerHtml(
     landscapeBtn.innerHTML = svgFullscreenEnter;
 
     const cornerRatio = 0.25;
+
     let hideTimeout = null;
     let isCssFullscreen = false;
     let isEndedState = false;
+    let mediaActivated = false;
+    let controlsAreVisible = true;
+
     let currentBrightness = 1;
     let currentVolume = 1;
 
@@ -1329,10 +1403,9 @@ function buildCustomPlayerHtml(
             String(s).padStart(2,'0');
     }
 
-    function isFullscreenCard(){
+    function isCustomFullscreenCard(){
         return document.fullscreenElement === card ||
             document.webkitFullscreenElement === card ||
-            video.webkitDisplayingFullscreen ||
             isCssFullscreen;
     }
 
@@ -1348,6 +1421,33 @@ function buildCustomPlayerHtml(
         }
     }
 
+    function areControlsVisible() {
+        return controlsAreVisible &&
+            controlsWrap.classList.contains('controls-visible') &&
+            insideMini.classList.contains('inside-visible');
+    }
+
+    function setControlsInteraction(enabled) {
+        controlsAreVisible = enabled;
+
+        insidePlay.disabled = !enabled;
+        insideForward.disabled = !enabled;
+        insideBack.disabled = !enabled;
+        landscapeBtn.disabled = !enabled;
+
+        seekBar.tabIndex = enabled ? 0 : -1;
+        seekBar.setAttribute(
+            'aria-disabled',
+            enabled ? 'false' : 'true'
+        );
+
+        controlsWrap.style.pointerEvents =
+            enabled ? 'auto' : 'none';
+
+        insideMini.style.pointerEvents =
+            enabled ? 'auto' : 'none';
+    }
+
     function updateUIForTime(time) {
         currentEl.textContent =
             formatTime(time);
@@ -1355,14 +1455,11 @@ function buildCustomPlayerHtml(
         const dur =
             video.duration || 1;
 
-        const pct =
-            Math.max(
-                0,
-                Math.min(
-                    100,
-                    (time / dur) * 100
-                )
-            );
+        let pct =
+            (time / dur) * 100;
+
+        pct =
+            Math.max(0, Math.min(100, pct));
 
         fill.style.width =
             pct + '%';
@@ -1386,32 +1483,20 @@ function buildCustomPlayerHtml(
         }
     }
 
-    async function tryAutoplay(){
-        try {
-            video.muted = false;
-            await video.play();
-        } catch(e) {
-            try {
-                video.muted = true;
-                await video.play();
-            } catch(_) {}
-        }
-
-        updatePlayIcon();
-    }
-
     function updatePlayIcon(){
         if (isEndedState) {
             return;
         }
 
         insidePlay.textContent =
-            video.paused
-                ? '▶︎'
-                : '❚❚';
+            video.paused ? '▶︎' : '❚❚';
     }
 
     async function togglePlay(){
+        if (!areControlsVisible()) {
+            return;
+        }
+
         unmuteVideo();
 
         if (isEndedState) {
@@ -1441,6 +1526,11 @@ function buildCustomPlayerHtml(
         'click',
         function(e){
             e.stopPropagation();
+
+            if (!areControlsVisible()) {
+                return;
+            }
+
             togglePlay();
             resetHideTimer();
         }
@@ -1450,6 +1540,11 @@ function buildCustomPlayerHtml(
         'click',
         function(e){
             e.stopPropagation();
+
+            if (!areControlsVisible()) {
+                return;
+            }
+
             unmuteVideo();
 
             const targetTime =
@@ -1473,6 +1568,11 @@ function buildCustomPlayerHtml(
         'click',
         function(e){
             e.stopPropagation();
+
+            if (!areControlsVisible()) {
+                return;
+            }
+
             unmuteVideo();
             clearEndedState();
 
@@ -1507,10 +1607,7 @@ function buildCustomPlayerHtml(
         p =
             Math.max(
                 0,
-                Math.min(
-                    1,
-                    p
-                )
+                Math.min(1, p)
             );
 
         return (
@@ -1519,6 +1616,10 @@ function buildCustomPlayerHtml(
     }
 
     function startScrub(clientX){
+        if (!areControlsVisible()) {
+            return;
+        }
+
         unmuteVideo();
         clearEndedState();
 
@@ -1540,11 +1641,17 @@ function buildCustomPlayerHtml(
             t;
 
         updateUIForTime(t);
+
         resetHideTimer();
     }
 
     function moveScrub(clientX){
-        if(!scrubbing) {
+        if (!scrubbing) {
+            return;
+        }
+
+        if (!areControlsVisible()) {
+            endScrub();
             return;
         }
 
@@ -1557,17 +1664,21 @@ function buildCustomPlayerHtml(
             t;
 
         updateUIForTime(t);
+
         resetHideTimer();
     }
 
     function endScrub(){
-        if(!scrubbing) {
+        if (!scrubbing) {
             return;
         }
 
         scrubbing = false;
 
-        if(wasPlayingBeforeScrub){
+        if (
+            wasPlayingBeforeScrub &&
+            areControlsVisible()
+        ) {
             try {
                 video.play().catch(
                     function(){}
@@ -1581,9 +1692,51 @@ function buildCustomPlayerHtml(
     seekBar.addEventListener(
         'mousedown',
         function(e){
+            if (!areControlsVisible()) {
+                return;
+            }
+
             e.preventDefault();
             e.stopPropagation();
             startScrub(e.clientX);
+        }
+    );
+
+    seekBar.addEventListener(
+        'touchstart',
+        function(e){
+            if (!areControlsVisible()) {
+                return;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (
+                e.touches &&
+                e.touches[0]
+            ) {
+                startScrub(
+                    e.touches[0].clientX
+                );
+            }
+        },
+        {passive:false}
+    );
+
+    thumb.addEventListener(
+        'pointerdown',
+        function(e){
+            if (!areControlsVisible()) {
+                return;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            startScrub(
+                e.clientX
+            );
         }
     );
 
@@ -1603,31 +1756,18 @@ function buildCustomPlayerHtml(
         }
     );
 
-    seekBar.addEventListener(
-        'touchstart',
-        function(e){
-            e.preventDefault();
-            e.stopPropagation();
-
-            if (
-                e.touches &&
-                e.touches[0]
-            ) {
-                startScrub(
-                    e.touches[0].clientX
-                );
-            }
-        },
-        {passive:false}
-    );
-
     window.addEventListener(
         'touchmove',
         function(e){
-            if(
+            if (
+                scrubbing &&
                 e.touches &&
                 e.touches[0]
             ) {
+                if (e.cancelable) {
+                    e.preventDefault();
+                }
+
                 moveScrub(
                     e.touches[0].clientX
                 );
@@ -1643,21 +1783,13 @@ function buildCustomPlayerHtml(
         }
     );
 
-    thumb.addEventListener(
-        'pointerdown',
-        function(e){
-            e.preventDefault();
-            e.stopPropagation();
-            startScrub(
-                e.clientX
-            );
-        }
-    );
-
     window.addEventListener(
         'pointermove',
         function(e){
-            if(e.pointerType) {
+            if (
+                scrubbing &&
+                e.pointerType
+            ) {
                 moveScrub(
                     e.clientX
                 );
@@ -1702,6 +1834,22 @@ function buildCustomPlayerHtml(
                 typeof video.volume === 'number'
                     ? video.volume
                     : 1;
+
+            hideBuffering();
+        }
+    );
+
+    video.addEventListener(
+        'loadeddata',
+        function(){
+            hideBuffering();
+        }
+    );
+
+    video.addEventListener(
+        'canplay',
+        function(){
+            hideBuffering();
         }
     );
 
@@ -1715,13 +1863,17 @@ function buildCustomPlayerHtml(
 
     video.addEventListener(
         'pause',
-        updatePlayIcon
+        function(){
+            updatePlayIcon();
+            hideBuffering();
+        }
     );
 
     video.addEventListener(
         'ended',
         function(){
             isEndedState = true;
+
             insidePlay.innerHTML =
                 svgReplay;
 
@@ -1755,6 +1907,10 @@ function buildCustomPlayerHtml(
             'inside-visible'
         );
 
+        setControlsInteraction(
+            true
+        );
+
         resetHideTimer();
     }
 
@@ -1775,6 +1931,10 @@ function buildCustomPlayerHtml(
             'inside-hidden'
         );
 
+        setControlsInteraction(
+            false
+        );
+
         if (hideTimeout) {
             clearTimeout(
                 hideTimeout
@@ -1784,14 +1944,9 @@ function buildCustomPlayerHtml(
 
     function toggleAll(){
         const isVisible =
-            controlsWrap.classList.contains(
-                'controls-visible'
-            ) &&
-            insideMini.classList.contains(
-                'inside-visible'
-            );
+            areControlsVisible();
 
-        if(isVisible) {
+        if (isVisible) {
             hideAll();
         } else {
             showAll();
@@ -1799,13 +1954,17 @@ function buildCustomPlayerHtml(
     }
 
     function resetHideTimer() {
-        if(hideTimeout) {
+        if (hideTimeout) {
             clearTimeout(
                 hideTimeout
             );
         }
 
-        if(isEndedState) {
+        if (isEndedState) {
+            return;
+        }
+
+        if (!areControlsVisible()) {
             return;
         }
 
@@ -1842,39 +2001,36 @@ function buildCustomPlayerHtml(
     card.addEventListener(
         'click',
         function(e){
-            if (
-                isOverControls(
-                    e.target
-                )
-            ) {
+            if (isOverControls(e.target)) {
                 return;
             }
 
             hideSwipeIndicatorsDirectly();
+
             toggleAll();
         }
     );
 
     window.addEventListener(
         'mousemove',
-        resetHideTimer
+        function(){
+            if (areControlsVisible()) {
+                resetHideTimer();
+            }
+        }
     );
 
-    window.addEventListener(
-        'touchstart',
-        resetHideTimer,
-        {passive:true}
-    );
-
-    [
+    const controlElements = [
         insidePlay,
         insideForward,
         insideBack,
         seekBar,
         landscapeBtn
-    ].forEach(
+    ];
+
+    controlElements.forEach(
         function(el){
-            if(!el) {
+            if (!el) {
                 return;
             }
 
@@ -1888,6 +2044,10 @@ function buildCustomPlayerHtml(
     );
 
     function enterLandscapeMode(){
+        if (!areControlsVisible()) {
+            return;
+        }
+
         unmuteVideo();
 
         const wasPlaying =
@@ -1899,7 +2059,7 @@ function buildCustomPlayerHtml(
         ) {
             video.webkitEnterFullscreen();
 
-            if(wasPlaying) {
+            if (wasPlaying) {
                 video.play().catch(
                     function(){}
                 );
@@ -1939,7 +2099,7 @@ function buildCustomPlayerHtml(
                     'landscape-mode'
                 );
 
-                if(wasPlaying) {
+                if (wasPlaying) {
                     video.play().catch(
                         function(){}
                     );
@@ -1949,25 +2109,12 @@ function buildCustomPlayerHtml(
             }
         ).catch(
             function(){
-                if(
+                if (
                     video.webkitEnterFullscreen
                 ) {
                     video.webkitEnterFullscreen();
                 } else {
-                    document.documentElement.requestFullscreen
-                        ?.call(
-                            document.documentElement
-                        )
-                        .catch(
-                            function(){}
-                        );
-
-                    const wrap =
-                        document.getElementById(
-                            'mainWrap'
-                        );
-
-                    wrap.classList.add(
+                    mainWrap.classList.add(
                         'css-fullscreen'
                     );
 
@@ -1982,7 +2129,7 @@ function buildCustomPlayerHtml(
                     'landscape-mode'
                 );
 
-                if(wasPlaying) {
+                if (wasPlaying) {
                     video.play().catch(
                         function(){}
                     );
@@ -1994,26 +2141,25 @@ function buildCustomPlayerHtml(
     }
 
     function exitLandscapeMode(){
+        if (!areControlsVisible()) {
+            return;
+        }
+
         const wasPlaying =
             !video.paused;
 
-        if(isCssFullscreen){
-            document
-                .getElementById(
-                    'mainWrap'
-                )
-                .classList.remove(
-                    'css-fullscreen'
-                );
+        if (isCssFullscreen) {
+            mainWrap.classList.remove(
+                'css-fullscreen'
+            );
 
-            isCssFullscreen =
-                false;
+            isCssFullscreen = false;
 
             landscapeBtn.innerHTML =
                 svgFullscreenEnter;
         } else {
-            try{
-                if(
+            try {
+                if (
                     screen.orientation &&
                     screen.orientation.unlock
                 ) {
@@ -2022,23 +2168,23 @@ function buildCustomPlayerHtml(
                     } catch(_) {}
                 }
 
-                if(document.exitFullscreen) {
+                if (document.exitFullscreen) {
                     document.exitFullscreen().catch(
                         function(){}
                     );
-                } else if(
+                } else if (
                     document.webkitExitFullscreen
                 ) {
                     document.webkitExitFullscreen();
                 }
-            }catch(err){}
+            } catch(err) {}
         }
 
         card.classList.remove(
             'landscape-mode'
         );
 
-        if(wasPlaying) {
+        if (wasPlaying) {
             video.play().catch(
                 function(){}
             );
@@ -2052,9 +2198,11 @@ function buildCustomPlayerHtml(
         function(e){
             e.stopPropagation();
 
-            if(
-                !isFullscreenCard()
-            ){
+            if (!areControlsVisible()) {
+                return;
+            }
+
+            if (!isCustomFullscreenCard()) {
                 enterLandscapeMode();
             } else {
                 exitLandscapeMode();
@@ -2065,7 +2213,7 @@ function buildCustomPlayerHtml(
     document.addEventListener(
         'fullscreenchange',
         function(){
-            if(
+            if (
                 document.fullscreenElement ===
                 card
             ) {
@@ -2085,16 +2233,11 @@ function buildCustomPlayerHtml(
                 landscapeBtn.innerHTML =
                     svgFullscreenEnter;
 
-                isCssFullscreen =
-                    false;
+                isCssFullscreen = false;
 
-                document
-                    .getElementById(
-                        'mainWrap'
-                    )
-                    .classList.remove(
-                        'css-fullscreen'
-                    );
+                mainWrap.classList.remove(
+                    'css-fullscreen'
+                );
 
                 showAll();
             }
@@ -2108,15 +2251,13 @@ function buildCustomPlayerHtml(
     let startTouchY = 0;
     let isVerticalSwipe = false;
     let swipeDirectionDetermined = false;
+    let gestureTouchIgnored = false;
 
     function showSwipeIndicator(
         kind,
         percent
     ){
-        if(
-            kind ===
-            'brightness'
-        ) {
+        if (kind === 'brightness') {
             swipeIconLeft.innerHTML =
                 svgBrightness;
 
@@ -2127,9 +2268,7 @@ function buildCustomPlayerHtml(
                 'show'
             );
 
-            if(
-                indicatorTimeoutLeft
-            ) {
+            if (indicatorTimeoutLeft) {
                 clearTimeout(
                     indicatorTimeoutLeft
                 );
@@ -2155,9 +2294,7 @@ function buildCustomPlayerHtml(
                 'show'
             );
 
-            if(
-                indicatorTimeoutRight
-            ) {
+            if (indicatorTimeoutRight) {
                 clearTimeout(
                     indicatorTimeoutRight
                 );
@@ -2184,17 +2321,13 @@ function buildCustomPlayerHtml(
             'show'
         );
 
-        if(
-            indicatorTimeoutLeft
-        ) {
+        if (indicatorTimeoutLeft) {
             clearTimeout(
                 indicatorTimeoutLeft
             );
         }
 
-        if(
-            indicatorTimeoutRight
-        ) {
+        if (indicatorTimeoutRight) {
             clearTimeout(
                 indicatorTimeoutRight
             );
@@ -2219,9 +2352,12 @@ function buildCustomPlayerHtml(
         clientX,
         clientY
     ){
-        if(
-            !isFullscreenCard()
-        ) {
+        if (!areControlsVisible()) {
+            gesture = null;
+            return;
+        }
+
+        if (!isCustomFullscreenCard()) {
             gesture = null;
             return;
         }
@@ -2230,53 +2366,43 @@ function buildCustomPlayerHtml(
             card.getBoundingClientRect();
 
         const relX =
-            clientX -
-            rect.left;
+            clientX - rect.left;
 
         const limit =
-            rect.width *
-            cornerRatio;
+            rect.width * cornerRatio;
 
-        if(
-            relX <= limit
-        ) {
+        if (relX <= limit) {
             gesture = {
                 type:'brightness',
                 startY:clientY,
-                initialValue:
-                    currentBrightness
+                initialValue:currentBrightness
             };
 
             showSwipeIndicator(
                 'brightness',
                 Math.round(
-                    gesture.initialValue *
-                    100
+                    gesture.initialValue * 100
                 )
             );
-        } else if(
+        } else if (
             relX >=
-            rect.width -
-            limit
+            rect.width - limit
         ) {
             currentVolume =
-                typeof video.volume ===
-                    'number'
+                typeof video.volume === 'number'
                     ? video.volume
                     : 1;
 
             gesture = {
                 type:'volume',
                 startY:clientY,
-                initialValue:
-                    currentVolume
+                initialValue:currentVolume
             };
 
             showSwipeIndicator(
                 'volume',
                 Math.round(
-                    gesture.initialValue *
-                    100
+                    gesture.initialValue * 100
                 )
             );
         } else {
@@ -2287,7 +2413,19 @@ function buildCustomPlayerHtml(
     function moveLandscapeGesture(
         clientY
     ){
-        if(!gesture) {
+        if (!gesture) {
+            return;
+        }
+
+        if (!areControlsVisible()) {
+            gesture = null;
+            hideSwipeIndicatorsDirectly();
+            return;
+        }
+
+        if (!isCustomFullscreenCard()) {
+            gesture = null;
+            hideSwipeIndicatorsDirectly();
             return;
         }
 
@@ -2295,15 +2433,11 @@ function buildCustomPlayerHtml(
             card.getBoundingClientRect();
 
         const delta =
-            gesture.startY -
-            clientY;
+            gesture.startY - clientY;
 
         const pct =
             delta /
-            (
-                rect.height *
-                0.7
-            );
+            (rect.height * 0.7);
 
         let newVal =
             gesture.initialValue +
@@ -2316,7 +2450,7 @@ function buildCustomPlayerHtml(
                 1
             );
 
-        if(
+        if (
             gesture.type ===
             'brightness'
         ) {
@@ -2334,8 +2468,7 @@ function buildCustomPlayerHtml(
             showSwipeIndicator(
                 'brightness',
                 Math.round(
-                    currentBrightness *
-                    100
+                    currentBrightness * 100
                 )
             );
         } else {
@@ -2348,15 +2481,14 @@ function buildCustomPlayerHtml(
             showSwipeIndicator(
                 'volume',
                 Math.round(
-                    currentVolume *
-                    100
+                    currentVolume * 100
                 )
             );
         }
     }
 
     function endLandscapeGesture(){
-        if(!gesture) {
+        if (!gesture) {
             return;
         }
 
@@ -2366,29 +2498,31 @@ function buildCustomPlayerHtml(
     card.addEventListener(
         'touchstart',
         function(e){
-            if(
-                !isFullscreenCard()
+            if (
+                !areControlsVisible() ||
+                !isCustomFullscreenCard()
             ) {
                 gesture = null;
+                gestureTouchIgnored = true;
                 return;
             }
 
-            if(
-                isOverControls(
-                    e.target
-                )
-            ) {
+            if (isOverControls(e.target)) {
                 gesture = null;
+                gestureTouchIgnored = true;
                 return;
             }
 
-            if(
-                !e.touches ||
+            if (
+                e.touches &&
                 e.touches.length !== 1
             ) {
                 gesture = null;
+                gestureTouchIgnored = true;
                 return;
             }
+
+            gestureTouchIgnored = false;
 
             const t =
                 e.touches[0];
@@ -2411,17 +2545,15 @@ function buildCustomPlayerHtml(
     card.addEventListener(
         'touchmove',
         function(e){
-            if(
-                !isFullscreenCard()
+            if (
+                gestureTouchIgnored ||
+                !areControlsVisible() ||
+                !isCustomFullscreenCard()
             ) {
-                gesture = null;
                 return;
             }
 
-            if(
-                !e.touches ||
-                !e.touches.length
-            ) {
+            if (!e.touches.length) {
                 return;
             }
 
@@ -2436,37 +2568,36 @@ function buildCustomPlayerHtml(
                 t.clientY -
                 startTouchY;
 
-            if(
-                !swipeDirectionDetermined &&
-                (
-                    Math.abs(diffX) > 12 ||
-                    Math.abs(diffY) > 12
-                )
-            ) {
-                swipeDirectionDetermined =
-                    true;
-
-                isVerticalSwipe =
-                    Math.abs(diffY) >
-                    Math.abs(diffX);
-
-                if(
-                    isVerticalSwipe
+            if (!swipeDirectionDetermined) {
+                if (
+                    Math.abs(diffY) > 10 ||
+                    Math.abs(diffX) > 10
                 ) {
-                    startLandscapeGesture(
-                        startTouchX,
-                        startTouchY
-                    );
-                } else {
-                    gesture = null;
+                    swipeDirectionDetermined =
+                        true;
+
+                    if (
+                        Math.abs(diffY) >
+                        Math.abs(diffX)
+                    ) {
+                        isVerticalSwipe =
+                            true;
+
+                        startLandscapeGesture(
+                            startTouchX,
+                            startTouchY
+                        );
+                    } else {
+                        isVerticalSwipe =
+                            false;
+
+                        gesture = null;
+                    }
                 }
             }
 
-            if(
-                isVerticalSwipe &&
-                gesture
-            ) {
-                if(e.cancelable) {
+            if (isVerticalSwipe) {
+                if (e.cancelable) {
                     e.preventDefault();
                 }
 
@@ -2482,6 +2613,7 @@ function buildCustomPlayerHtml(
         'touchend',
         function(){
             endLandscapeGesture();
+            gestureTouchIgnored = false;
         },
         {passive:true}
     );
@@ -2490,35 +2622,48 @@ function buildCustomPlayerHtml(
         'touchcancel',
         function(){
             endLandscapeGesture();
+            gestureTouchIgnored = false;
         },
         {passive:true}
     );
 
-    function showBuffering() {
-        backContainer.style.visibility =
-            'hidden';
+    function showBuffering(){
+        if (backContainer) {
+            backContainer.style.visibility =
+                'hidden';
+        }
 
-        playContainer.style.visibility =
-            'hidden';
+        if (playContainer) {
+            playContainer.style.visibility =
+                'hidden';
+        }
 
-        forwardContainer.style.visibility =
-            'hidden';
+        if (forwardContainer) {
+            forwardContainer.style.visibility =
+                'hidden';
+        }
 
         spinnerContainer.style.display =
             'flex';
     }
 
-    function hideBuffering() {
-        backContainer.style.visibility =
-            'visible';
+    function hideBuffering(){
+        if (backContainer) {
+            backContainer.style.visibility =
+                'visible';
+        }
 
-        playContainer.style.visibility =
-            'visible';
+        if (playContainer) {
+            playContainer.style.visibility =
+                'visible';
+        }
 
-        forwardContainer.style.visibility =
-            isEndedState
-                ? 'hidden'
-                : 'visible';
+        if (forwardContainer) {
+            forwardContainer.style.visibility =
+                isEndedState
+                    ? 'hidden'
+                    : 'visible';
+        }
 
         spinnerContainer.style.display =
             'none';
@@ -2540,6 +2685,18 @@ function buildCustomPlayerHtml(
     );
 
     video.addEventListener(
+        'stalled',
+        function(){
+            if (
+                video.readyState <
+                3
+            ) {
+                showBuffering();
+            }
+        }
+    );
+
+    video.addEventListener(
         'playing',
         hideBuffering
     );
@@ -2555,87 +2712,307 @@ function buildCustomPlayerHtml(
     );
 
     video.addEventListener(
+        'canplaythrough',
+        hideBuffering
+    );
+
+    video.addEventListener(
         'pause',
         hideBuffering
     );
 
-    if(
-        video.readyState >= 3
+    if (
+        video.readyState >=
+        3
     ) {
         hideBuffering();
     }
 
-    const sourceUrl =
-        video.querySelector(
-            'source'
-        )?.src || '';
-
-    video.addEventListener(
-        'error',
-        async function(){
-            try {
-                const r =
-                    await fetch(
-                        sourceUrl,
-                        {
-                            method:'HEAD'
-                        }
-                    );
-
-                if(!r.ok) {
-                    showError(
-                        'Sève an repon ' +
-                        r.status +
-                        '.'
-                    );
-                } else {
-                    showError(
-                        'Fòma videyo sa a pa sipòte.'
-                    );
-                }
-            } catch(fetchErr) {
-                showError(
-                    'Erè koneksyon (oubyen rezo a pa la).'
-                );
-            }
+    function showUnsupportedDownload(){
+        if (mediaActivated) {
+            return;
         }
-    );
+
+        mediaActivated = true;
+
+        hideBuffering();
+
+        window.location.replace(
+            downloadUrl
+        );
+    }
 
     function showError(msg){
-        if(errTxt) {
+        if (errTxt) {
             errTxt.textContent =
                 msg;
         }
 
-        if(errorOverlay) {
+        if (errorOverlay) {
             errorOverlay.style.display =
                 'flex';
         }
 
         hideBuffering();
+        hideAll();
+    }
+
+    video.addEventListener(
+        'error',
+        function(){
+            const mediaError =
+                video.error;
+
+            if (
+                mediaError &&
+                (
+                    mediaError.code === 3 ||
+                    mediaError.code === 4
+                )
+            ) {
+                showUnsupportedDownload();
+                return;
+            }
+
+            if (
+                mediaError &&
+                mediaError.code === 2
+            ) {
+                showError(
+                    'Erè koneksyon (oubyen rezo a pa la).'
+                );
+                return;
+            }
+
+            showUnsupportedDownload();
+        }
+    );
+
+    function activateVideo(){
+        if (mediaActivated) {
+            return;
+        }
+
+        let canPlay = '';
+
+        try {
+            canPlay =
+                video.canPlayType(
+                    mimeType
+                );
+        } catch(e) {
+            canPlay = '';
+        }
+
+        if (!canPlay) {
+            showUnsupportedDownload();
+            return;
+        }
+
+        mediaActivated = true;
+
+        if (source) {
+            source.src =
+                source.getAttribute(
+                    'data-src'
+                ) || mediaUrl;
+        }
+
+        video.src =
+            mediaUrl;
+
+        video.load();
+
+        tryAutoplay();
+    }
+
+    async function tryAutoplay(){
+        try {
+            video.muted = false;
+            await video.play();
+        } catch(e) {
+            try {
+                video.muted = true;
+                await video.play();
+            } catch(_) {}
+        }
+
+        updatePlayIcon();
     }
 
     document.addEventListener(
         'click',
-        unmuteVideo
+        function(){
+            unmuteVideo();
+        }
     );
 
     document.addEventListener(
         'touchstart',
-        unmuteVideo,
+        function(){
+            unmuteVideo();
+        },
         {passive:true}
     );
 
-    tryAutoplay();
+    document.addEventListener(
+        'contextmenu',
+        function(e){
+            e.preventDefault();
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'selectstart',
+        function(e){
+            e.preventDefault();
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'dragstart',
+        function(e){
+            e.preventDefault();
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'copy',
+        function(e){
+            e.preventDefault();
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'cut',
+        function(e){
+            e.preventDefault();
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'paste',
+        function(e){
+            e.preventDefault();
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'dblclick',
+        function(e){
+            e.preventDefault();
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'gesturestart',
+        function(e){
+            e.preventDefault();
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'gesturechange',
+        function(e){
+            e.preventDefault();
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'gestureend',
+        function(e){
+            e.preventDefault();
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'wheel',
+        function(e){
+            if (
+                e.ctrlKey ||
+                e.metaKey
+            ) {
+                e.preventDefault();
+            }
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'touchstart',
+        function(e){
+            if (
+                e.touches &&
+                e.touches.length > 1
+            ) {
+                e.preventDefault();
+            }
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'touchmove',
+        function(e){
+            if (
+                e.touches &&
+                e.touches.length > 1
+            ) {
+                e.preventDefault();
+            }
+        },
+        {passive:false}
+    );
+
+    document.addEventListener(
+        'keydown',
+        function(e){
+            const key =
+                String(
+                    e.key || ''
+                ).toLowerCase();
+
+            if (
+                e.ctrlKey ||
+                e.metaKey ||
+                key === 'f12' ||
+                key === 'f5'
+            ) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        },
+        {passive:false}
+    );
+
     showAll();
 
+    window.addEventListener(
+        'load',
+        function(){
+            setTimeout(
+                activateVideo,
+                0
+            );
+        },
+        {once:true}
+    );
+
     window.__player = {
-        video
+        video:video
     };
 })();
 </script>
-
-${buildUiRestrictionScript()}
 </body>
 </html>`;
 }
@@ -2643,51 +3020,16 @@ ${buildUiRestrictionScript()}
 function sendUnknown(req, res) {
     if (
         req.headers.accept &&
-        req.headers.accept.includes(
-            'text/html'
-        )
+        req.headers.accept.includes('text/html')
     ) {
-        res
-            .status(404)
-            .send(
-                '<!doctype html><html lang="ht"><head><meta charset="UTF-8"><title>Paj sa pa ekziste</title></head><body style="background:#000;color:#fff;text-align:center;padding:50px;font-family:sans-serif;"><h1>Paj sa pa ekziste</h1><script>setTimeout(function(){ window.close(); window.history.back(); }, 1500);</script></body></html>'
-            );
+        res.status(404).send(
+            '<!doctype html><html lang="ht"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Paj sa pa ekziste</title></head><body style="margin:0;background:#000;color:#fff;text-align:center;padding:50px;font-family:sans-serif;overflow:hidden;user-select:none;-webkit-user-select:none;"><h1>Paj sa pa ekziste</h1><script>setTimeout(function(){ window.close(); window.history.back(); }, 1500);</script></body></html>'
+        );
     } else {
-        res
-            .status(404)
-            .send(
-                'Paj sa pa ekziste'
-            );
+        res.status(404).send(
+            'Paj sa pa ekziste'
+        );
     }
-}
-
-function sendMediaError(
-    req,
-    res,
-    message
-) {
-    if (
-        req.headers.accept &&
-        (
-            req.headers.accept.includes(
-                'application/json'
-            ) ||
-            req.headers.accept.includes(
-                'text/json'
-            )
-        )
-    ) {
-        return res
-            .status(404)
-            .json({
-                error:message
-            });
-    }
-
-    return res
-        .status(404)
-        .type('text')
-        .send(message);
 }
 
 async function getRemoteObjectMeta(token) {
@@ -2718,19 +3060,17 @@ async function getRemoteObjectMeta(token) {
                     ).toISOString()
                     : null
         };
-    } catch(err) {
+    } catch (err) {
         return null;
     }
 }
 
-function safeDecodeURIComponent(
-    value
-) {
+function safeDecodeURIComponent(value) {
     try {
         return decodeURIComponent(
             value
         );
-    } catch(err) {
+    } catch (err) {
         return value;
     }
 }
@@ -2744,7 +3084,7 @@ async function ensureMappingFromR2(
             token
         });
 
-    if(entry) {
+    if (entry) {
         return entry;
     }
 
@@ -2753,7 +3093,7 @@ async function ensureMappingFromR2(
             token
         );
 
-    if(
+    if (
         !meta ||
         !meta.exists
     ) {
@@ -2782,22 +3122,21 @@ async function ensureMappingFromR2(
             token
         );
 
-    entry =
-        new FileModel({
-            token,
-            originalName,
-            safeOriginal,
-            size:
-                meta.contentLength ||
-                0,
-            mime:
-                meta.contentType ||
-                null,
-            createdAt:
-                meta.lastModified ||
-                new Date(),
-            storage:'r2'
-        });
+    entry = new FileModel({
+        token,
+        originalName,
+        safeOriginal,
+        size:
+            meta.contentLength ||
+            0,
+        mime:
+            meta.contentType ||
+            null,
+        createdAt:
+            meta.lastModified ||
+            new Date(),
+        storage:'r2'
+    });
 
     await entry.save();
 
@@ -2838,7 +3177,7 @@ app.options(
 );
 
 app.use(
-    (req,res,next) => {
+    (req, res, next) => {
         res.header(
             'Access-Control-Allow-Origin',
             '*'
@@ -2862,7 +3201,7 @@ app.use(
     compression({
         filter:(req,res) => {
             try {
-                if(
+                if (
                     req &&
                     req.path &&
                     req.path.startsWith(
@@ -2917,7 +3256,7 @@ const multerStorage = {
                     key:'global'
                 });
 
-            if(!status) {
+            if (!status) {
                 status =
                     await new StatusModel({
                         key:'global',
@@ -2938,7 +3277,7 @@ const multerStorage = {
                 dbStats.dataSize ||
                 0;
 
-            if(
+            if (
                 status.totalSize +
                 estimatedSize >
                 LIMIT_R2_BYTES ||
@@ -3064,9 +3403,9 @@ const upload =
 app.post(
     '/upload',
     upload.single('file'),
-    async (req,res) => {
+    async (req, res) => {
         try {
-            if(
+            if (
                 !req.file &&
                 !req.uploadToken
             ) {
@@ -3166,12 +3505,12 @@ app.get(
         '/TF-:token/download',
         '/TF-:token/download/:name'
     ],
-    async (req,res) => {
+    async (req, res) => {
         try {
             let token =
                 req.params.token;
 
-            if(token) {
+            if (token) {
                 token =
                     token.replace(
                         /\/$/,
@@ -3192,7 +3531,7 @@ app.get(
                     requestedName
                 );
 
-            if(!entry) {
+            if (!entry) {
                 return sendUnknown(
                     req,
                     res
@@ -3211,9 +3550,11 @@ app.get(
             const isValidName =
                 !requestedName ||
                 requestedName ===
-                    entry.safeOriginal;
+                    entry.safeOriginal ||
+                requestedName ===
+                    entry.originalName;
 
-            if(!isValidName) {
+            if (!isValidName) {
                 return res
                     .status(404)
                     .send(
@@ -3265,12 +3606,12 @@ app.get(
         '/TF-:token/',
         '/TF-:token/:name'
     ],
-    async (req,res) => {
+    async (req, res) => {
         try {
             let token =
                 req.params.token;
 
-            if(token) {
+            if (token) {
                 token =
                     token.replace(
                         /\/$/,
@@ -3288,7 +3629,7 @@ app.get(
                     requestedName
                 );
 
-            if(!entry) {
+            if (!entry) {
                 return sendUnknown(
                     req,
                     res
@@ -3300,14 +3641,27 @@ app.get(
                 entry.originalName ||
                 'file';
 
+            const filename =
+                requestedName ||
+                realName;
+
             const isVideo =
                 isVideoFile(
-                    realName
+                    filename
                 );
 
             const isImage =
                 isImageFile(
-                    realName
+                    filename
+                );
+
+            const isValidName =
+                requestedName &&
+                (
+                    requestedName ===
+                        entry.safeOriginal ||
+                    requestedName ===
+                        entry.originalName
                 );
 
             const origin = (
@@ -3323,8 +3677,14 @@ app.get(
                     token
                 );
 
-            if(!requestedName) {
-                if(isVideo) {
+            const downloadPath =
+                `/TF-${token}/download/${encodeURIComponent(realName)}`;
+
+            const downloadUrl =
+                `${origin}${downloadPath}`;
+
+            if (!requestedName) {
+                if (isVideo) {
                     const fullUrl =
                         `${origin}/TF-${token}`;
 
@@ -3337,83 +3697,120 @@ app.get(
                                 directR2Url,
                                 fullUrl,
                                 entry.mime ||
-                                contentTypeFromName(
-                                    realName
-                                )
+                                    contentTypeFromName(
+                                        filename
+                                    ),
+                                downloadUrl
                             )
                         );
                 }
 
-                return sendMediaError(
-                    req,
-                    res,
-                    isImage
-                        ? 'Yon imaj bezwen yon slug valide.'
-                        : 'Fichye sa a bezwen yon slug valide.'
-                );
-            }
-
-            const decodedName =
-                safeDecodeURIComponent(
-                    requestedName
-                );
-
-            const isValidName =
-                decodedName ===
-                entry.safeOriginal;
-
-            if(!isValidName) {
-                return sendMediaError(
-                    req,
-                    res,
-                    'Slug fichye a pa valide.'
-                );
-            }
-
-            const isRequestedVideo =
-                isVideoFile(
-                    entry.safeOriginal
-                );
-
-            const isRequestedImage =
-                isImageFile(
-                    entry.safeOriginal
-                );
-
-            if(
-                isRequestedVideo ||
-                isRequestedImage
-            ) {
-                const mediaUrl =
-                    await buildPresignedMediaUrl(
-                        token,
-                        entry.safeOriginal,
-                        entry.mime ||
-                        contentTypeFromName(
-                            entry.safeOriginal
+                return res
+                    .status(200)
+                    .type('html')
+                    .send(
+                        buildForceDownloadHtml(
+                            realName,
+                            downloadUrl
                         )
+                    );
+            }
+
+            if (!isValidName) {
+                if (
+                    isEmbeddedMediaRequest(
+                        req
+                    )
+                ) {
+                    return res
+                        .status(404)
+                        .send(
+                            'Fichye pa ekziste'
+                        );
+                }
+
+                return res
+                    .status(200)
+                    .type('html')
+                    .send(
+                        buildForceDownloadHtml(
+                            realName,
+                            downloadUrl
+                        )
+                    );
+            }
+
+            if (
+                isEmbeddedMediaRequest(
+                    req
+                )
+            ) {
+                if (
+                    isVideo ||
+                    isImage
+                ) {
+                    const mediaUrl =
+                        await buildPresignedMediaUrl(
+                            token,
+                            realName,
+                            entry.mime ||
+                                contentTypeFromName(
+                                    realName
+                                )
+                        );
+
+                    return res.redirect(
+                        302,
+                        mediaUrl
+                    );
+                }
+
+                const mediaDownloadUrl =
+                    await buildPresignedDownloadUrl(
+                        token,
+                        realName,
+                        entry.mime ||
+                            contentTypeFromName(
+                                realName
+                            )
                     );
 
                 return res.redirect(
                     302,
-                    mediaUrl
+                    mediaDownloadUrl
                 );
             }
 
-            const downloadUrl =
-                await buildPresignedDownloadUrl(
-                    token,
-                    entry.safeOriginal,
-                    entry.mime ||
-                    contentTypeFromName(
-                        entry.safeOriginal
+            if (
+                isVideo ||
+                isImage
+            ) {
+                return res
+                    .status(200)
+                    .type('html')
+                    .send(
+                        buildLightweightViewerHtml(
+                            realName,
+                            directR2Url,
+                            downloadUrl,
+                            isVideo,
+                            entry.mime ||
+                                contentTypeFromName(
+                                    filename
+                                )
+                        )
+                    );
+            }
+
+            return res
+                .status(200)
+                .type('html')
+                .send(
+                    buildForceDownloadHtml(
+                        realName,
+                        downloadUrl
                     )
                 );
-
-            return res.redirect(
-                302,
-                downloadUrl
-            );
         } catch(err) {
             return sendUnknown(
                 req,
@@ -3425,7 +3822,7 @@ app.get(
 
 app.get(
     '/_admin/mappings',
-    async (req,res) => {
+    async (req, res) => {
         try {
             const count =
                 await FileModel.countDocuments();
@@ -3467,7 +3864,7 @@ app.get(
 
 app.get(
     '/sitemap.xml',
-    (req,res) => {
+    (req, res) => {
         res.sendFile(
             path.join(
                 __dirname,
@@ -3479,7 +3876,7 @@ app.get(
 
 app.get(
     '/poste.json',
-    (req,res) => {
+    (req, res) => {
         try {
             const filePath =
                 path.join(
@@ -3487,9 +3884,11 @@ app.get(
                     'poste.json'
                 );
 
-            if(!fs.existsSync(
-                filePath
-            )) {
+            if (
+                !fs.existsSync(
+                    filePath
+                )
+            ) {
                 return res.json([]);
             }
 
@@ -3504,9 +3903,11 @@ app.get(
                     fileContent
                 );
 
-            if(!Array.isArray(
-                jsonData
-            )) {
+            if (
+                !Array.isArray(
+                    jsonData
+                )
+            ) {
                 return res.json(
                     jsonData
                 );
@@ -3541,7 +3942,7 @@ app.get(
 
 app.get(
     '/health',
-    (req,res) => {
+    (req, res) => {
         res.json({
             ok:true
         });
@@ -3550,8 +3951,8 @@ app.get(
 
 app.get(
     '*',
-    (req,res,next) => {
-        if(
+    (req, res, next) => {
+        if (
             req.path.startsWith(
                 '/TF-'
             ) ||
@@ -3575,9 +3976,11 @@ app.get(
                 'index.html'
             );
 
-        if(fs.existsSync(
-            indexPath
-        )) {
+        if (
+            fs.existsSync(
+                indexPath
+            )
+        ) {
             res.setHeader(
                 'Content-Type',
                 'text/html; charset=utf-8'
@@ -3597,8 +4000,8 @@ app.get(
 );
 
 app.use(
-    (err,req,res,next) => {
-        if(
+    (err, req, res, next) => {
+        if (
             err &&
             err.code ===
                 'LIMIT_FILE_SIZE'
@@ -3611,7 +4014,7 @@ app.use(
                 });
         }
 
-        if(err) {
+        if (err) {
             return res
                 .status(500)
                 .json({
@@ -3644,7 +4047,7 @@ setInterval(
                     }
                 });
 
-            for(
+            for (
                 const entry
                 of oldFiles
             ) {
@@ -3679,4 +4082,6 @@ setInterval(
     3600000
 );
 
-app.listen(PORT);
+app.listen(
+    PORT
+);
