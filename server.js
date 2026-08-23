@@ -394,8 +394,8 @@ a{
 </head>
 <body>
 <div>
-    <p>Telechaje ta sipoze kòmanse….</p>
-    <a id="dl" href="${safeUrl}" download="${safeTitle}">Si telechaje a pat kòmanse klike la…</a>
+    <p>Telechajman an ta sipoze kòmanse….</p>
+    <a id="dl" href="${safeUrl}" download="${safeTitle}">Si telechajman an pako kòmanse klike la…</a>
 </div>
 ${buildUiRestrictionScript()}
 <script>
