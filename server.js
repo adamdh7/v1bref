@@ -180,9 +180,13 @@ function escapeHtml(text) {
 function wantsHtmlPreview(req) {
     const accept = String(req.headers.accept || '').toLowerCase();
     const dest = String(req.headers['sec-fetch-dest'] || '').toLowerCase();
-    if (dest === 'video' || dest === 'audio' || dest === 'image' || dest === 'empty') return false;
+    const hasRange = Boolean(req.headers.range);
+
+    if (hasRange) return false;
+    if (dest === 'video' || dest === 'audio' || dest === 'image') return false;
     if (dest === 'document' || dest === 'iframe' || dest === 'object' || dest === 'embed') return true;
     if (accept.includes('text/html')) return true;
+    if (!dest && !accept.includes('video/') && !accept.includes('audio/') && !accept.includes('image/')) return true;
     return false;
 }
 
